@@ -88,6 +88,20 @@ export const tweetStyles: Record<string, TweetStyle> = {
       'Gaming is bigger than music, movies, and TV combined.\n\nIt\'s compounding 10% year on year.\n\nThe $100bn a year spent "renting" items is going to turn into a trillion dollar ownable economy.\n\nAll of it will be built on web3.',
     description: "Multiple short paragraphs building a narrative",
   },
+  bigpara: {
+    name: "Big Paragraph Tweet",
+    example:
+      "Most game studios still think distribution, payments, and identity are separate problems. They are not. The next winning stack will treat them as one growth system so every campaign, purchase, and player action compounds into better targeting, attribution, and monetisation.",
+    description:
+      "One larger paragraph that develops a fuller argument without breaking into multiple short paragraphs or bullets.",
+  },
+  stackedlines: {
+    name: "Stacked Lines Tweet",
+    example:
+      "growth got harder\nidentity got fragmented\npayments stayed expensive\n\nthat is exactly why web3 gaming infrastructure is becoming inevitable",
+    description:
+      "A sequence of short stacked lines where each line adds momentum before landing the payoff.",
+  },
 };
 
 export type Archetype =

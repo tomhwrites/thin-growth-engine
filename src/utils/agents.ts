@@ -261,6 +261,8 @@ function buildTweetAgentSystemPrompt(
 // imported by both /api/generate-tweets and /api/research-pipeline.
 export const dbStyleMapping: Record<string, string> = {
   multiparagraph: "Multiple paras",
+  bigpara: "Big para",
+  stackedlines: "Stacked lines",
   hookbullets: "Hook + list",
   causeeffect: "Cause + effect 2 liner",
   oneliner: "One liner",
@@ -323,7 +325,7 @@ function getClient() {
   return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 }
 
-async function callClaude(
+export async function callClaude(
   system: string,
   userPrompt: string,
   maxTokens = 1000,
@@ -574,24 +576,42 @@ export interface ResearchResult {
   findings: string[];
 }
 
+// Filters out markdown noise that the model sometimes emits despite format instructions.
+function isCleanFinding(line: string): boolean {
+  if (!line) return false;
+  if (/^[-#*_]{1,4}$/.test(line)) return false; // pure symbols: ---, ##, **
+  if (/^\*\*/.test(line)) return false;          // bold headers like **Finding 1 —**
+  if (line.length < 15) return false;            // too short to be a real data point
+  return true;
+}
+
 export async function runResearchAgent(
   topic: string,
   evidenceNeeds: EvidenceNeed[]
 ): Promise<ResearchResult[]> {
   const system = `You are a senior crypto research analyst with access to live web search. Given specific data points needed to validate investment beliefs, use web search to find the most current, real data, statistics, and facts from reputable primary sources.
 
-For each evidence need, search the web and provide the most relevant real data point. Include specific numbers, dates, company names, and source URLs where possible. Prefer primary sources (company blog posts, on-chain data, official reports) over secondary coverage.
+For each evidence need, search the web and provide the most relevant real data points. Include specific numbers, dates, company names, and source URLs where possible. Prefer primary sources (company blog posts, on-chain data, official reports) over secondary coverage.
 
 Be factual and specific. No speculation. No hedging language.
 Prioritize evidence that directly supports the bullish belief being tested. If there is an important caveat, include at most one, but do not let caveats dominate the findings.
 
-Output format:
+STRICT OUTPUT FORMAT — follow this exactly, no exceptions:
 Belief 1: [restate belief]
-- Finding: [specific data point with numbers]
-- Finding: [specific data point with numbers]
-- Finding: [specific data point with numbers]
+- Finding: [one sentence, specific data point with numbers]
+- Finding: [one sentence, specific data point with numbers]
+- Finding: [one sentence, specific data point with numbers]
 
-Belief 2: ...`;
+Belief 2: [restate belief]
+- Finding: [one sentence, specific data point with numbers]
+...
+
+CRITICAL FORMAT RULES:
+- Each finding must be exactly ONE sentence. No paragraphs. No line breaks within a finding.
+- No markdown: no **, no ##, no ---, no headers, no bold, no italics.
+- No "Finding 1 —" labels. Just "- Finding:" followed by the sentence.
+- No commentary, analysis, or caveats outside the finding lines.
+- No blank lines within a belief block.`;
 
   const evidenceList = evidenceNeeds
     .map(
@@ -623,7 +643,7 @@ Belief 2: ...`;
     const findings = lines
       .slice(1)
       .map((l) => l.replace(/^[-•]\s*Finding:\s*/i, "").trim())
-      .filter(Boolean);
+      .filter(isCleanFinding);
     results.push({ belief: beliefText, findings });
   }
 
@@ -660,14 +680,21 @@ For each belief, do all of the following:
 
 Output the FULL set of findings for each belief — prior findings you still trust PLUS new findings you discovered. Drop any prior findings that turned out to be wrong or unsupported. Be factual and specific. No speculation. No hedging.
 
-Output format:
+STRICT OUTPUT FORMAT — follow this exactly, no exceptions:
 Belief 1: [restate belief]
-- Finding: [specific data point with numbers]
-- Finding: [specific data point with numbers]
-- Finding: [specific data point with numbers]
-- Finding: [specific data point with numbers]
+- Finding: [one sentence, specific data point with numbers]
+- Finding: [one sentence, specific data point with numbers]
+- Finding: [one sentence, specific data point with numbers]
 
-Belief 2: ...`;
+Belief 2: [restate belief]
+- Finding: [one sentence, specific data point with numbers]
+...
+
+CRITICAL FORMAT RULES:
+- Each finding must be exactly ONE sentence. No paragraphs. No line breaks within a finding.
+- No markdown: no **, no ##, no ---, no headers, no bold, no italics.
+- No "Finding 1 —" labels. Just "- Finding:" followed by the sentence.
+- No commentary or caveats outside the finding lines.`;
 
   const evidenceList = evidenceNeeds
     .map((e, i) => {
@@ -696,7 +723,7 @@ Belief 2: ...`;
     const findings = lines
       .slice(1)
       .map((l) => l.replace(/^[-•]\s*Finding:\s*/i, "").trim())
-      .filter(Boolean);
+      .filter(isCleanFinding);
     results.push({ belief: beliefText, findings });
   }
 
@@ -866,7 +893,9 @@ export function buildSharedTweetDrafterUserPrompt(
   archetype?: string,
   extraSections: string[] = []
 ): string {
-  const sections: string[] = [`Topic: ${topic}`];
+  const sections: string[] = [
+    `Creative brief: "${topic}"\nThis is your primary directive. Honor its tone, angle, and specific phrasing — not just the subject matter. If the brief is casual or conversational, the tweets should feel that way. Do not override the brief's implied voice with generic positioning.`,
+  ];
   if (archetype) {
     sections.push(
       `Archetype: ${archetype} — frame every tweet so it fits this archetype.`
@@ -898,7 +927,7 @@ export function buildSharedTweetDrafterUserPrompt(
     sections.push(`Archetype exemplars — emulate the PROPOSITIONAL CONTENT, angle, and framing of these tweets (not their structure):\n${exemplarTweets.archetypeExemplars}`);
   }
   sections.push(
-    `Generate 6 distinct tweets in the "${tweetStyleName}" style.\nStyle description: ${tweetStyleDescription}`
+    `Generate 6 distinct tweets in the "${tweetStyleName}" style.\nStyle description: ${tweetStyleDescription}\n\nIMPORTANT: Every single tweet must strictly follow the "${tweetStyleName}" format described above. If the format requires multiple stacked lines, all 6 tweets must have multiple stacked lines. A tweet that is a single sentence or a bare stat with no structure is a format failure — rewrite it before outputting.`
   );
   sections.push(
     `Use the material above as raw input. Each tweet should feel like it was written by an informed operator with genuine conviction, not a marketing team. The final read on every tweet should be net bullish on Immutable or the market shift being described. If you mention a tension, resolve it into a stronger positive takeaway. Vary the opening move across the batch by using a mix of hook types rather than repeating the same pattern.\n\nSeparate each tweet with "||". Output ONLY the tweets.`
@@ -915,6 +944,15 @@ export function parseDraftedTweets(raw: string): string[] {
     .slice(0, 6);
 }
 
+const COMMUNITY_ENGAGEMENT_SYSTEM_PROMPT = `You write casual, authentic tweets for a crypto founder account. Your goal is human connection with the audience — not bullish positioning, not product marketing.
+
+Rules:
+- No emojis, no hashtags, no hyphens
+- No engagement bait ("like if you agree", "RT this")
+- Keep the voice genuine and personal
+- Every tweet must strictly follow the requested format — if the format requires multiple stacked lines, every tweet must have multiple stacked lines
+- Output ONLY the tweets separated by "||" — no labels, numbering, or commentary`;
+
 export async function runTweetDrafter(
   topic: string,
   narrative: NarrativeOutput,
@@ -925,6 +963,29 @@ export async function runTweetDrafter(
   archetype?: string,
   options: { skipCritic?: boolean; extraSections?: string[] } = {}
 ): Promise<string[]> {
+  // Community engagement bypasses all Immutable business context and bullish
+  // framing rules — these tweets are about founder voice, not VC positioning.
+  if (archetype === "Community engagement") {
+    const exemplarBlock = exemplarTweets.archetypeExemplars
+      ? `Examples — match the tone, voice, and feel of these:\n${exemplarTweets.archetypeExemplars}`
+      : exemplarTweets.formExemplars
+        ? `Examples — match the structure and feel of these:\n${exemplarTweets.formExemplars}`
+        : "";
+    const communityPrompt = [
+      `Creative brief: "${topic}"\nThis is your primary directive. Honor its tone and phrasing exactly.`,
+      exemplarBlock,
+      `Generate 6 distinct tweets in the "${tweetStyleName}" style.\nStyle description: ${tweetStyleDescription}\n\nIMPORTANT: Every single tweet must strictly follow the "${tweetStyleName}" format. A bare single-line stat is a format failure.`,
+      `Separate each tweet with "||". Output ONLY the tweets.`,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+
+    const raw = await callClaude(COMMUNITY_ENGAGEMENT_SYSTEM_PROMPT, communityPrompt, 2000, {
+      includeBusinessContext: false,
+    });
+    return parseDraftedTweets(raw);
+  }
+
   const prompt = buildSharedTweetDrafterUserPrompt(
     topic,
     narrative,

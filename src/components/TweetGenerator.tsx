@@ -13,6 +13,7 @@ import {
   archetypeOptions,
   hookTypeOptions,
   ANY_ARCHETYPE,
+  tweetStyles,
 } from "@/utils/tweetConfig";
 import type {
   Belief,
@@ -36,7 +37,7 @@ export type Metric = {
   selected: boolean;
 };
 
-type DataSource = "internal" | "research";
+type DataSource = "internal" | "quick" | "deep";
 type PlannerMode = "single" | "weekly" | "bespoke";
 
 type StageKey = "belief" | "evidence" | "research" | "narrative" | "hook" | "draft";
@@ -80,15 +81,11 @@ const EMPTY_PIPELINE: PipelineState = {
 
 // ---------- Tweet styles ----------
 
-const tweetStyleOptions = [
-  { id: "catchphrase", name: "Catch Phrase", description: "Short, memorable phrase that captures attention" },
-  { id: "oneliner", name: "One Liner Statement", description: "Single impactful statement that stands alone" },
-  { id: "causeeffect", name: "Cause and Effect 2 Liner", description: "Shows relationship between two connected ideas" },
-  { id: "comparison", name: "Comparison", description: "Contrasts two different ideas or timeframes" },
-  { id: "parallelism", name: "Parallelism", description: "Uses similar structure to emphasize a pattern" },
-  { id: "hookbullets", name: "Hook + Bullet Points", description: "Opening hook followed by concise bullet points" },
-  { id: "multiparagraph", name: "Multiparagraph", description: "Multiple short paragraphs building a narrative" },
-];
+const tweetStyleOptions = Object.entries(tweetStyles).map(([id, style]) => ({
+  id,
+  name: style.name,
+  description: style.description,
+}));
 
 // ---------- Component ----------
 
@@ -98,7 +95,7 @@ const TweetGenerator = (props: TweetGeneratorProps) => {
   const [topic, setTopic] = useState("");
   const [selectedStyleId, setSelectedStyleId] = useState("catchphrase");
   const [selectedArchetype, setSelectedArchetype] = useState<string>(ANY_ARCHETYPE);
-  const [dataSource, setDataSource] = useState<DataSource>("research");
+  const [dataSource, setDataSource] = useState<DataSource>("deep");
   const [loading, setLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -204,7 +201,64 @@ const TweetGenerator = (props: TweetGeneratorProps) => {
     return messages[stage];
   };
 
-  // ---------- Internal data flow (existing) ----------
+  // ---------- Internal-only flow (DB, no web search) ----------
+
+  const handleGenerateInternalOnly = async () => {
+    setLoading(true);
+    setError(null);
+    setLoadingMessage("Fetching from database...");
+    setPipeline(EMPTY_PIPELINE);
+    setTweets([]);
+
+    try {
+      const topicToUse = topic || "Web3 gaming";
+      const internalResponse = await fetch("/api/fetchInternalData", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic: topicToUse }),
+      });
+      if (!internalResponse.ok) {
+        const errData = await internalResponse.json().catch(() => ({}));
+        throw new Error(errData.error || `Internal data API error: ${internalResponse.status}`);
+      }
+      const internalData = await internalResponse.json();
+
+      if (internalData.count === 0) {
+        setError("No data found in the database for this topic. Try Quick Research instead.");
+        return;
+      }
+
+      setLoadingMessage("Generating tweets from internal data...");
+      const generateResponse = await fetch("/api/generate-tweets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          topic: topicToUse,
+          overarchingNarrative: internalData.overarchingNarrative || "",
+          selectedMetrics: internalData.metrics.map((m: Metric) => m.name),
+          tweetStyle: selectedStyleId,
+          archetype: selectedArchetype || undefined,
+        } as GenerateTweetsRequest),
+      });
+      if (!generateResponse.ok) {
+        const errData = await generateResponse.json().catch(() => ({}));
+        throw new Error(errData.error || `Generate API error: ${generateResponse.status}`);
+      }
+      const data = await generateResponse.json();
+      if (data.tweets?.length > 0) {
+        setTweets(data.tweets);
+        setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
+      } else {
+        setError("No tweets were generated.");
+      }
+    } catch (err: any) {
+      setError(err.message || "Something went wrong.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ---------- Quick research flow (3 web searches) ----------
 
   const handleGenerateInternal = async () => {
     setLoading(true);
@@ -260,6 +314,8 @@ const TweetGenerator = (props: TweetGeneratorProps) => {
 
   const handleGenerate = () => {
     if (dataSource === "internal") {
+      handleGenerateInternalOnly();
+    } else if (dataSource === "quick") {
       handleGenerateInternal();
     } else {
       runFrom("belief", EMPTY_PIPELINE);
@@ -449,21 +505,7 @@ const TweetGenerator = (props: TweetGeneratorProps) => {
       {/* Data Source Toggle */}
       <div>
         <label className="block text-sm font-medium text-gray-300 mb-3">Data Source</label>
-        <div className="grid grid-cols-2 gap-3">
-          <button
-            onClick={() => setDataSource("research")}
-            className={`p-4 rounded-lg border transition-all duration-200 flex items-center gap-3 ${
-              dataSource === "research"
-                ? "border-purple-500 bg-purple-900/30 shadow-lg shadow-purple-500/20"
-                : "border-gray-700 bg-white/5 hover:bg-white/10 hover:border-gray-500"
-            }`}
-          >
-            <BsRobot className="h-5 w-5 text-purple-400 flex-shrink-0" />
-            <div className="text-left">
-              <h3 className="text-white font-medium text-sm">Research Agent</h3>
-              <p className="text-gray-400 text-xs">6-stage AI pipeline with belief-driven research</p>
-            </div>
-          </button>
+        <div className="grid grid-cols-3 gap-3">
           <button
             onClick={() => setDataSource("internal")}
             className={`p-4 rounded-lg border transition-all duration-200 flex items-center gap-3 ${
@@ -474,8 +516,36 @@ const TweetGenerator = (props: TweetGeneratorProps) => {
           >
             <HiOutlineDatabase className="h-5 w-5 text-purple-400 flex-shrink-0" />
             <div className="text-left">
-              <h3 className="text-white font-medium text-sm">Internal Data</h3>
-              <p className="text-gray-400 text-xs">Google News metrics + existing flow</p>
+              <h3 className="text-white font-medium text-sm">Internal Only</h3>
+              <p className="text-gray-400 text-xs">Database + topic text, no web search</p>
+            </div>
+          </button>
+          <button
+            onClick={() => setDataSource("quick")}
+            className={`p-4 rounded-lg border transition-all duration-200 flex items-center gap-3 ${
+              dataSource === "quick"
+                ? "border-purple-500 bg-purple-900/30 shadow-lg shadow-purple-500/20"
+                : "border-gray-700 bg-white/5 hover:bg-white/10 hover:border-gray-500"
+            }`}
+          >
+            <RiAiGenerate className="h-5 w-5 text-purple-400 flex-shrink-0" />
+            <div className="text-left">
+              <h3 className="text-white font-medium text-sm">Quick Research</h3>
+              <p className="text-gray-400 text-xs">3 web searches, fast turnaround</p>
+            </div>
+          </button>
+          <button
+            onClick={() => setDataSource("deep")}
+            className={`p-4 rounded-lg border transition-all duration-200 flex items-center gap-3 ${
+              dataSource === "deep"
+                ? "border-purple-500 bg-purple-900/30 shadow-lg shadow-purple-500/20"
+                : "border-gray-700 bg-white/5 hover:bg-white/10 hover:border-gray-500"
+            }`}
+          >
+            <BsRobot className="h-5 w-5 text-purple-400 flex-shrink-0" />
+            <div className="text-left">
+              <h3 className="text-white font-medium text-sm">Deep Research</h3>
+              <p className="text-gray-400 text-xs">6-stage belief-driven pipeline</p>
             </div>
           </button>
         </div>
@@ -575,7 +645,7 @@ const TweetGenerator = (props: TweetGeneratorProps) => {
       </div>
 
       {/* Pipeline Stages (Research Agent only) */}
-      {dataSource === "research" && hasPipelineData && (
+      {dataSource === "deep" && hasPipelineData && (
         <div className="space-y-3">
           <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wide">Pipeline</h3>
           {STAGES.map((stage) => {
@@ -777,10 +847,16 @@ function StageOutput({ stageKey, pipeline }: { stageKey: StageKey; pipeline: Pip
               <p className="text-gray-400 text-xs font-medium mb-1">{e.belief}</p>
               {e.dataPointsNeeded.map((d, j) => (
                 <div key={j} className="ml-2 mb-2">
-                  <p className="text-white text-sm">- {d.metric}</p>
+                  <p className="text-white text-sm">
+                    {d.rank ? `${d.rank}. ` : "- "}
+                    {d.metric}
+                  </p>
                   <p className="text-gray-500 text-xs ml-3">
                     {d.sourceType} | {d.bullishSignal}
                   </p>
+                  {d.whyCompelling && (
+                    <p className="text-gray-600 text-xs ml-3 italic">{d.whyCompelling}</p>
+                  )}
                 </div>
               ))}
             </div>
