@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint .",
     "ge": "tsx bin/ge.ts",
+    "ge:chain": "tsx bin/ge-chain.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {

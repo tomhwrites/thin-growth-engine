@@ -10,6 +10,16 @@ import { GenerateTweetsRequest } from "@/utils/generateFromOpenAI";
 import BespokeAgentWorkbench from "@/components/BespokeAgentWorkbench";
 import WeeklyPlanner from "@/components/WeeklyPlanner";
 import { contentTopicOptions, CONTENT_TOPIC_ANY } from "@/utils/tweetConfig";
+import type {
+  Belief,
+  EvidenceNeed,
+  EvidencePoint,
+  HookOutput,
+  NarrativeOutput,
+  ResearchFinding,
+  ResearchResult,
+  SupportingDatum,
+} from "@/types/researchPipeline";
 
 type TweetGeneratorProps = {
   tweets: string[];
@@ -24,33 +34,6 @@ export type Metric = {
 
 type DataSource = "internal" | "research";
 type PlannerMode = "single" | "weekly" | "bespoke";
-
-// ---------- Pipeline types ----------
-
-interface Belief {
-  belief: string;
-  whyItMatters: string;
-}
-
-interface EvidenceNeed {
-  belief: string;
-  dataPointsNeeded: string[];
-}
-
-interface ResearchResult {
-  belief: string;
-  findings: string[];
-}
-
-interface NarrativeOutput {
-  insight: string;
-  angle: string;
-  supportingData: string[];
-}
-
-interface HookOutput {
-  hooks: string[];
-}
 
 type StageKey = "belief" | "evidence" | "research" | "narrative" | "hook" | "draft";
 
@@ -789,7 +772,12 @@ function StageOutput({ stageKey, pipeline }: { stageKey: StageKey; pipeline: Pip
             <div key={i} className="pl-3 border-l-2 border-blue-500/30">
               <p className="text-gray-400 text-xs font-medium mb-1">{e.belief}</p>
               {e.dataPointsNeeded.map((d, j) => (
-                <p key={j} className="text-white text-sm ml-2">- {d}</p>
+                <div key={j} className="ml-2 mb-2">
+                  <p className="text-white text-sm">- {d.metric}</p>
+                  <p className="text-gray-500 text-xs ml-3">
+                    {d.sourceType} | {d.bullishSignal}
+                  </p>
+                </div>
               ))}
             </div>
           ))}
@@ -803,7 +791,12 @@ function StageOutput({ stageKey, pipeline }: { stageKey: StageKey; pipeline: Pip
             <div key={i} className="pl-3 border-l-2 border-green-500/30">
               <p className="text-gray-400 text-xs font-medium mb-1">{r.belief}</p>
               {r.findings.map((f, j) => (
-                <p key={j} className="text-white text-sm ml-2">- {f}</p>
+                <div key={j} className="ml-2 mb-2">
+                  <p className="text-white text-sm">- {f.claim}</p>
+                  {f.sourceUrl && (
+                    <p className="text-gray-500 text-xs ml-3 break-all">{f.sourceUrl}</p>
+                  )}
+                </div>
               ))}
             </div>
           ))}
@@ -816,7 +809,12 @@ function StageOutput({ stageKey, pipeline }: { stageKey: StageKey; pipeline: Pip
           <p className="text-white text-sm">{pipeline.narrative.insight}</p>
           <p className="text-purple-300 text-xs">Angle: {pipeline.narrative.angle}</p>
           {pipeline.narrative.supportingData.map((d, i) => (
-            <p key={i} className="text-gray-400 text-xs ml-2">- {d}</p>
+            <div key={i} className="ml-2 mb-2">
+              <p className="text-gray-400 text-xs">- {d.claim}</p>
+              {d.sourceUrl && (
+                <p className="text-gray-500 text-xs ml-3 break-all">{d.sourceUrl}</p>
+              )}
+            </div>
           ))}
         </div>
       ) : null;
@@ -905,10 +903,10 @@ function BeliefsEditor({ beliefs, onSave, onCancel }: { beliefs: Belief[]; onSav
 
 function EvidenceEditor({ evidence, onSave, onCancel }: { evidence: EvidenceNeed[]; onSave: (e: EvidenceNeed[]) => void; onCancel: () => void }) {
   const [items, setItems] = useState<EvidenceNeed[]>(evidence);
-  const updatePoint = (i: number, j: number, value: string) => {
+  const updatePoint = (i: number, j: number, field: keyof EvidencePoint, value: string) => {
     const next = [...items];
     next[i] = { ...next[i], dataPointsNeeded: [...next[i].dataPointsNeeded] };
-    next[i].dataPointsNeeded[j] = value;
+    next[i].dataPointsNeeded[j] = { ...next[i].dataPointsNeeded[j], [field]: value };
     setItems(next);
   };
   return (
@@ -917,12 +915,26 @@ function EvidenceEditor({ evidence, onSave, onCancel }: { evidence: EvidenceNeed
         <div key={i}>
           <p className="text-gray-400 text-xs font-medium mb-1">{e.belief}</p>
           {e.dataPointsNeeded.map((d, j) => (
-            <input
-              key={j}
-              className="w-full bg-white/10 border border-gray-700 rounded px-3 py-1.5 text-white text-sm outline-none focus:border-purple-500 mb-1"
-              value={d}
-              onChange={(ev) => updatePoint(i, j, ev.target.value)}
-            />
+            <div key={j} className="space-y-1 mb-2">
+              <input
+                className="w-full bg-white/10 border border-gray-700 rounded px-3 py-1.5 text-white text-sm outline-none focus:border-purple-500"
+                value={d.metric}
+                onChange={(ev) => updatePoint(i, j, "metric", ev.target.value)}
+                placeholder="Metric"
+              />
+              <input
+                className="w-full bg-white/10 border border-gray-700 rounded px-3 py-1.5 text-gray-300 text-xs outline-none focus:border-purple-500"
+                value={d.sourceType}
+                onChange={(ev) => updatePoint(i, j, "sourceType", ev.target.value)}
+                placeholder="Source type"
+              />
+              <input
+                className="w-full bg-white/10 border border-gray-700 rounded px-3 py-1.5 text-gray-300 text-xs outline-none focus:border-purple-500"
+                value={d.bullishSignal}
+                onChange={(ev) => updatePoint(i, j, "bullishSignal", ev.target.value)}
+                placeholder="Bullish signal"
+              />
+            </div>
           ))}
         </div>
       ))}
@@ -933,10 +945,10 @@ function EvidenceEditor({ evidence, onSave, onCancel }: { evidence: EvidenceNeed
 
 function ResearchEditor({ research, onSave, onCancel }: { research: ResearchResult[]; onSave: (r: ResearchResult[]) => void; onCancel: () => void }) {
   const [items, setItems] = useState<ResearchResult[]>(research);
-  const updateFinding = (i: number, j: number, value: string) => {
+  const updateFinding = (i: number, j: number, field: keyof ResearchFinding, value: string) => {
     const next = [...items];
     next[i] = { ...next[i], findings: [...next[i].findings] };
-    next[i].findings[j] = value;
+    next[i].findings[j] = { ...next[i].findings[j], [field]: value };
     setItems(next);
   };
   return (
@@ -945,12 +957,20 @@ function ResearchEditor({ research, onSave, onCancel }: { research: ResearchResu
         <div key={i}>
           <p className="text-gray-400 text-xs font-medium mb-1">{r.belief}</p>
           {r.findings.map((f, j) => (
-            <input
-              key={j}
-              className="w-full bg-white/10 border border-gray-700 rounded px-3 py-1.5 text-white text-sm outline-none focus:border-purple-500 mb-1"
-              value={f}
-              onChange={(ev) => updateFinding(i, j, ev.target.value)}
-            />
+            <div key={j} className="space-y-1 mb-2">
+              <input
+                className="w-full bg-white/10 border border-gray-700 rounded px-3 py-1.5 text-white text-sm outline-none focus:border-purple-500"
+                value={f.claim}
+                onChange={(ev) => updateFinding(i, j, "claim", ev.target.value)}
+                placeholder="Claim"
+              />
+              <input
+                className="w-full bg-white/10 border border-gray-700 rounded px-3 py-1.5 text-gray-300 text-xs outline-none focus:border-purple-500"
+                value={f.sourceUrl}
+                onChange={(ev) => updateFinding(i, j, "sourceUrl", ev.target.value)}
+                placeholder="Source URL"
+              />
+            </div>
           ))}
         </div>
       ))}
@@ -961,9 +981,9 @@ function ResearchEditor({ research, onSave, onCancel }: { research: ResearchResu
 
 function NarrativeEditor({ narrative, onSave, onCancel }: { narrative: NarrativeOutput; onSave: (n: NarrativeOutput) => void; onCancel: () => void }) {
   const [data, setData] = useState<NarrativeOutput>(narrative);
-  const updateDataPoint = (i: number, value: string) => {
+  const updateDataPoint = (i: number, field: keyof SupportingDatum, value: string) => {
     const next = { ...data, supportingData: [...data.supportingData] };
-    next.supportingData[i] = value;
+    next.supportingData[i] = { ...next.supportingData[i], [field]: value };
     setData(next);
   };
   return (
@@ -984,20 +1004,37 @@ function NarrativeEditor({ narrative, onSave, onCancel }: { narrative: Narrative
           value={data.angle}
           onChange={(e) => setData({ ...data, angle: e.target.value })}
         >
-          {["Contrarian", "Inevitability", "Hidden metric", "Reframe", "Milestone", "Comparison"].map((a) => (
-            <option key={a} value={a} className="bg-gray-900">{a}</option>
+          {[
+            { value: "contrarian", label: "Contrarian" },
+            { value: "inevitability", label: "Inevitability" },
+            { value: "hidden-metric", label: "Hidden metric" },
+            { value: "reframe", label: "Reframe" },
+            { value: "milestone", label: "Milestone" },
+            { value: "comparison", label: "Comparison" },
+          ].map((a) => (
+            <option key={a.value} value={a.value} className="bg-gray-900">
+              {a.label}
+            </option>
           ))}
         </select>
       </div>
       <div>
         <label className="text-gray-500 text-xs">Supporting Data</label>
         {data.supportingData.map((d, i) => (
-          <input
-            key={i}
-            className="w-full bg-white/10 border border-gray-700 rounded px-3 py-1.5 text-white text-sm outline-none focus:border-purple-500 mb-1"
-            value={d}
-            onChange={(e) => updateDataPoint(i, e.target.value)}
-          />
+          <div key={i} className="space-y-1 mb-2">
+            <input
+              className="w-full bg-white/10 border border-gray-700 rounded px-3 py-1.5 text-white text-sm outline-none focus:border-purple-500"
+              value={d.claim}
+              onChange={(e) => updateDataPoint(i, "claim", e.target.value)}
+              placeholder="Claim"
+            />
+            <input
+              className="w-full bg-white/10 border border-gray-700 rounded px-3 py-1.5 text-gray-300 text-xs outline-none focus:border-purple-500"
+              value={d.sourceUrl}
+              onChange={(e) => updateDataPoint(i, "sourceUrl", e.target.value)}
+              placeholder="Source URL"
+            />
+          </div>
         ))}
       </div>
       <EditorButtons onSave={() => onSave(data)} onCancel={onCancel} />

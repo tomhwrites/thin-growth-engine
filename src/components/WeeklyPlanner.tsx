@@ -7,7 +7,6 @@ import {
   ARCHETYPE_DEFAULTS,
   buildDefaultBauWeeklyPlanSlots,
   buildDefaultWeeklyPlanSlots,
-  type SlotStatus,
   type WeeklyInput,
   type WeeklyPlanningMode,
   type WeeklyPlanSlot,
@@ -15,7 +14,6 @@ import {
   type WeeklySynthesis,
   WEEKLY_CONTENT_TOPIC_OPTIONS,
   WEEKLY_DRAFT_MODE_OPTIONS,
-  WEEKLY_STATUS_OPTIONS,
 } from "@/types/weeklyPlanning";
 
 type PlannerRequestStage = "synthesize" | "plan" | "draft_slot";

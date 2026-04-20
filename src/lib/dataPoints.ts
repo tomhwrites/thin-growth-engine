@@ -3,7 +3,6 @@
 // facts to inject into prompts, and format them for the model.
 
 import { prisma } from "@/lib/prisma";
-import type { ResearchResult } from "@/utils/agents";
 
 /** Insert research findings as atomized data points (one row per finding). */
 export async function persistResearchAsDataPoints(

@@ -68,7 +68,7 @@ async function pullDataPoints(): Promise<{
 
       await prisma.dataPoints.create({ data });
       created++;
-    } catch (e) {
+    } catch {
       skipped++;
     }
   }
@@ -124,7 +124,7 @@ async function pullExemplarTweets(): Promise<{
 
       await prisma.exemplarTweets.create({ data });
       created++;
-    } catch (e) {
+    } catch {
       skipped++;
     }
   }
