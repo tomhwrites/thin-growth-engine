@@ -14,6 +14,7 @@ export type GenerateTweetsRequest = {
   overarchingNarrative: string;
   selectedMetrics: string[];
   tweetStyle: string;
+  archetype?: string;
   contentTopic?: string;
   model?: string;
   customPrompt?: string;
@@ -36,7 +37,14 @@ export interface GenerateTweetsResponse {
 export async function generateTweetsFromOpenAI(
   params: GenerateTweetsRequest
 ): Promise<GenerateTweetsResponse> {
-  const { topic, tweetStyle, customPrompt, overarchingNarrative, selectedMetrics, contentTopic } = params;
+  const {
+    topic,
+    tweetStyle,
+    customPrompt,
+    overarchingNarrative,
+    selectedMetrics,
+    archetype = params.contentTopic,
+  } = params;
 
   console.log("Using OpenAI GPT-4o model with web search");
 
@@ -52,7 +60,7 @@ export async function generateTweetsFromOpenAI(
 
   try {
     console.log("Fetching shared exemplars for style:", selectedStyle.name);
-    const exemplarTweetsText = await getExemplarsForStyle(tweetStyle, contentTopic);
+    const exemplarTweetsText = await getExemplarsForStyle(tweetStyle, archetype);
 
     // STEP 1: Gather relevant information via web search
     console.log("Step 1: Gathering relevant information via web search...");
@@ -95,7 +103,7 @@ export async function generateTweetsFromOpenAI(
       selectedStyle.name,
       selectedStyle.description,
       exemplarTweetsText,
-      contentTopic,
+      archetype,
       [`Live research information:\n${researchInfo}`]
     );
 

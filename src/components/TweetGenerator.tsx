@@ -9,7 +9,11 @@ import { BsRobot } from "react-icons/bs";
 import { GenerateTweetsRequest } from "@/utils/generateFromOpenAI";
 import BespokeAgentWorkbench from "@/components/BespokeAgentWorkbench";
 import WeeklyPlanner from "@/components/WeeklyPlanner";
-import { contentTopicOptions, CONTENT_TOPIC_ANY } from "@/utils/tweetConfig";
+import {
+  archetypeOptions,
+  hookTypeOptions,
+  ANY_ARCHETYPE,
+} from "@/utils/tweetConfig";
 import type {
   Belief,
   EvidenceNeed,
@@ -93,7 +97,7 @@ const TweetGenerator = (props: TweetGeneratorProps) => {
   const [plannerMode, setPlannerMode] = useState<PlannerMode>("single");
   const [topic, setTopic] = useState("");
   const [selectedStyleId, setSelectedStyleId] = useState("catchphrase");
-  const [selectedContentTopic, setSelectedContentTopic] = useState<string>(CONTENT_TOPIC_ANY);
+  const [selectedArchetype, setSelectedArchetype] = useState<string>(ANY_ARCHETYPE);
   const [dataSource, setDataSource] = useState<DataSource>("research");
   const [loading, setLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState("");
@@ -114,7 +118,7 @@ const TweetGenerator = (props: TweetGeneratorProps) => {
           stage,
           topic: topic || "Web3 gaming",
           tweetStyle: selectedStyleId,
-          contentTopic: selectedContentTopic || undefined,
+          archetype: selectedArchetype || undefined,
           beliefs: currentPipeline.beliefs,
           evidenceNeeds: currentPipeline.evidenceNeeds,
           research: currentPipeline.research,
@@ -128,7 +132,7 @@ const TweetGenerator = (props: TweetGeneratorProps) => {
       }
       return response.json();
     },
-    [topic, selectedStyleId, selectedContentTopic]
+    [topic, selectedStyleId, selectedArchetype]
   );
 
   // Run pipeline from a given stage through to draft
@@ -231,7 +235,7 @@ const TweetGenerator = (props: TweetGeneratorProps) => {
           overarchingNarrative: metricsData.overarchingNarrative || "",
           selectedMetrics: metricsData.metrics.map((m: Metric) => m.name),
           tweetStyle: selectedStyleId,
-          contentTopic: selectedContentTopic || undefined,
+          archetype: selectedArchetype || undefined,
         } as GenerateTweetsRequest),
       });
       if (!generateResponse.ok) {
@@ -288,7 +292,7 @@ const TweetGenerator = (props: TweetGeneratorProps) => {
           stage: "deepen",
           topic: topic || "Web3 gaming",
           tweetStyle: selectedStyleId,
-          contentTopic: selectedContentTopic || undefined,
+          archetype: selectedArchetype || undefined,
           evidenceNeeds: pipeline.evidenceNeeds,
           research: pipeline.research,
         }),
@@ -321,7 +325,7 @@ const TweetGenerator = (props: TweetGeneratorProps) => {
       setRunningStage(null);
       setLoading(false);
     }
-  }, [pipeline, topic, selectedStyleId, selectedContentTopic, runFrom, setTweets]);
+  }, [pipeline, topic, selectedStyleId, selectedArchetype, runFrom, setTweets]);
 
   // ---------- Editing ----------
 
@@ -494,15 +498,15 @@ const TweetGenerator = (props: TweetGeneratorProps) => {
         />
       </div>
 
-      {/* Content Archetype Selection */}
+      {/* Archetype Selection */}
       <div>
-        <label className="block text-sm font-medium text-gray-300 mb-2">Content Archetype</label>
+        <label className="block text-sm font-medium text-gray-300 mb-2">Archetype</label>
         <select
-          value={selectedContentTopic}
-          onChange={(e) => setSelectedContentTopic(e.target.value)}
+          value={selectedArchetype}
+          onChange={(e) => setSelectedArchetype(e.target.value)}
           className="w-full p-3 border border-gray-600 rounded-lg outline-none text-white bg-white/10 focus:border-purple-500 transition-colors"
         >
-          {contentTopicOptions.map((opt) => (
+          {archetypeOptions.map((opt) => (
             <option key={opt.value || "any"} value={opt.value} className="bg-gray-900">
               {opt.label}
             </option>
@@ -822,8 +826,13 @@ function StageOutput({ stageKey, pipeline }: { stageKey: StageKey; pipeline: Pip
     case "hook":
       return (
         <div className="pl-3 border-l-2 border-orange-500/30 space-y-1">
-          {pipeline.hooks?.hooks.map((h, i) => (
-            <p key={i} className="text-white text-sm">{h}</p>
+          {pipeline.hooks?.hooks.map((hook, i) => (
+            <div key={i}>
+              <p className="text-orange-300 text-[11px] uppercase tracking-wide">
+                {hook.type}
+              </p>
+              <p className="text-white text-sm">{hook.text}</p>
+            </div>
           ))}
         </div>
       );
@@ -1043,21 +1052,43 @@ function NarrativeEditor({ narrative, onSave, onCancel }: { narrative: Narrative
 }
 
 function HooksEditor({ hooks, onSave, onCancel }: { hooks: HookOutput; onSave: (h: HookOutput) => void; onCancel: () => void }) {
-  const [items, setItems] = useState<string[]>(hooks.hooks);
-  const update = (i: number, value: string) => {
+  const [items, setItems] = useState(hooks.hooks);
+  const update = (i: number, field: "type" | "text", value: string) => {
     const next = [...items];
-    next[i] = value;
+    next[i] = { ...next[i], [field]: value };
     setItems(next);
   };
   return (
     <div className="space-y-2">
-      {items.map((h, i) => (
-        <input
-          key={i}
-          className="w-full bg-white/10 border border-gray-600 rounded px-3 py-2 text-white text-sm outline-none focus:border-purple-500"
-          value={h}
-          onChange={(e) => update(i, e.target.value)}
-        />
+      <div className="rounded-lg border border-gray-700 bg-white/5 px-3 py-2 text-xs text-gray-400">
+        <div className="mb-2 font-medium text-gray-300">Hook types</div>
+        <div className="space-y-1">
+          {hookTypeOptions.map((option) => (
+            <div key={option.value}>
+              <span className="text-gray-200">{option.label}:</span> {option.description}
+            </div>
+          ))}
+        </div>
+      </div>
+      {items.map((hook, i) => (
+        <div key={i} className="space-y-2">
+          <select
+            className="w-full bg-white/10 border border-gray-700 rounded px-3 py-2 text-white text-sm outline-none focus:border-purple-500"
+            value={hook.type}
+            onChange={(e) => update(i, "type", e.target.value)}
+          >
+            {hookTypeOptions.map((option) => (
+              <option key={option.value} value={option.value} className="bg-gray-900">
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <input
+            className="w-full bg-white/10 border border-gray-600 rounded px-3 py-2 text-white text-sm outline-none focus:border-purple-500"
+            value={hook.text}
+            onChange={(e) => update(i, "text", e.target.value)}
+          />
+        </div>
       ))}
       <EditorButtons onSave={() => onSave({ hooks: items })} onCancel={onCancel} />
     </div>

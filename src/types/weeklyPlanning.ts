@@ -1,5 +1,5 @@
-import type { ContentTopic } from "@/utils/tweetConfig";
-import { weeklyContentTopicOptions } from "@/utils/tweetConfig";
+import type { Archetype } from "@/utils/tweetConfig";
+import { weeklyArchetypeOptions } from "@/utils/tweetConfig";
 
 export type AudienceLens =
   | "crypto_investor"
@@ -37,7 +37,7 @@ export interface WeeklyPlanSlot {
   slotNumber: number;
   day: string;
   scheduleLabel: string;
-  contentTopic: ContentTopic;
+  archetype: Archetype;
   goal: string;
   topic: string;
   evidence: string;
@@ -53,7 +53,7 @@ export interface WeeklySlotDraft {
   alternateDraft: string;
 }
 
-export const WEEKLY_CONTENT_TOPIC_OPTIONS = weeklyContentTopicOptions;
+export const WEEKLY_ARCHETYPE_OPTIONS = weeklyArchetypeOptions;
 
 export const WEEKLY_AUDIENCE_OPTIONS: { value: AudienceLens; label: string }[] = [
   { value: "crypto_investor", label: "Crypto Investor" },
@@ -98,150 +98,127 @@ export const DEFAULT_DAY_SEQUENCE = [
   "Friday",
 ] as const;
 
-export const DEFAULT_ARCHETYPE_SEQUENCE: ContentTopic[] = [
-  "Thought leadership",
-  "Product",
-  "Social proof",
-  "Macro Commentary",
-  "Product",
-  "Partner Games",
-  "Thought leadership",
-  "Ecosystem",
-  "Product",
-  "Social proof",
-  "Macro Commentary",
-  "Partner Games",
+export const DEFAULT_ARCHETYPE_SEQUENCE: Archetype[] = [
+  "Payments",
+  "Identity / Attribution",
+  "New combined Web3 thesis",
+  "Product Launch / Update",
+  "Partner Game Announcement",
+  "Partner Traction / Proof Point",
+  "Ecosystem Traction",
+  "Web2 will become Web3",
+  "Macro trends / Regulation",
+  "Vision / Industry Thesis",
+  "Signing Preannouncement",
+  "Mobile gaming",
+  "AI gaming",
+  "Community engagement",
   "Web3 gaming = Future",
-  "Personal",
-  "Thought leadership",
 ];
 
 const DEFAULT_BAU_SLOT_BLUEPRINT: Array<{
   scheduleLabel: string;
-  contentTopic: ContentTopic;
-}> = [
-  {
-    scheduleLabel: "Web3 gaming = Future",
-    contentTopic: "Web3 gaming = Future",
-  },
-  {
-    scheduleLabel: "Community Engagement",
-    contentTopic: "Personal",
-  },
-  {
-    scheduleLabel: "Macro Commentary",
-    contentTopic: "Macro Commentary",
-  },
-  {
-    scheduleLabel: "Product",
-    contentTopic: "Product",
-  },
-  {
-    scheduleLabel: "Partner Games",
-    contentTopic: "Partner Games",
-  },
-  {
-    scheduleLabel: "New Narrative",
-    contentTopic: "Thought leadership",
-  },
-  {
-    scheduleLabel: "Rewards on Immutable",
-    contentTopic: "Product",
-  },
-  {
-    scheduleLabel: "Web3 gaming = Future",
-    contentTopic: "Web3 gaming = Future",
-  },
-  {
-    scheduleLabel: "New Thesis re Web3 Infra",
-    contentTopic: "Thought leadership",
-  },
-  {
-    scheduleLabel: "Community Engagement",
-    contentTopic: "Personal",
-  },
-  {
-    scheduleLabel: "Product",
-    contentTopic: "Product",
-  },
-  {
-    scheduleLabel: "Ecosystem",
-    contentTopic: "Ecosystem",
-  },
-  {
-    scheduleLabel: "Macro Commentary",
-    contentTopic: "Macro Commentary",
-  },
-  {
-    scheduleLabel: "New Narrative",
-    contentTopic: "Thought leadership",
-  },
-  {
-    scheduleLabel: "New Thesis re Web3 Infra",
-    contentTopic: "Thought leadership",
-  },
-];
+  archetype: Archetype;
+}> = DEFAULT_ARCHETYPE_SEQUENCE.map((archetype) => ({
+  scheduleLabel: archetype,
+  archetype,
+}));
 
 export const ARCHETYPE_DEFAULTS: Record<
-  ContentTopic,
+  Archetype,
   {
     goal: string;
     tweetStyle: string;
     evidencePrompt: string;
   }
 > = {
-  Product: {
-    goal: "Translate product momentum into practical operator value",
+  Payments: {
+    goal: "Translate payment rails into a tangible growth or monetisation unlock",
     tweetStyle: "comparison",
-    evidencePrompt: "Feature launch, distribution win, onboarding improvement, or studio benefit",
+    evidencePrompt: "Payment flow improvement, conversion lift, checkout UX gain, or monetisation proof point",
+  },
+  "Identity / Attribution": {
+    goal: "Show why identity resolution and attribution are becoming core gaming infrastructure",
+    tweetStyle: "multiparagraph",
+    evidencePrompt: "Identity graph, attribution visibility, retargeting signal, or player profile proof point",
+  },
+  "New combined Web3 thesis": {
+    goal: "Introduce a fresh market thesis that combines multiple shifts into one compelling narrative",
+    tweetStyle: "multiparagraph",
+    evidencePrompt: "Cross-cutting market shift, structural unlock, or synthesis of multiple trends",
+  },
+  "Product Launch / Update": {
+    goal: "Turn a product release into a clear operator-level value story",
+    tweetStyle: "comparison",
+    evidencePrompt: "Feature launch, release note, workflow improvement, or customer-facing benefit",
+  },
+  "Partner Game Announcement": {
+    goal: "Make a new partner announcement feel strategically meaningful, not just newsy",
+    tweetStyle: "hookbullets",
+    evidencePrompt: "New game signing, partner launch detail, or why the partner matters",
+  },
+  "Partner Traction / Proof Point": {
+    goal: "Use partner momentum as hard proof that the platform story is working",
+    tweetStyle: "comparison",
+    evidencePrompt: "Partner metric, growth rate, retention stat, launch traction, or player milestone",
+  },
+  "Ecosystem Traction": {
+    goal: "Show compounding value across the ecosystem rather than one isolated win",
+    tweetStyle: "hookbullets",
+    evidencePrompt: "Ecosystem milestone, network effect signal, aggregate traction, or multi-partner momentum",
+  },
+  "Web2 will become Web3": {
+    goal: "Frame web3 adoption as the natural destination for mainstream digital products",
+    tweetStyle: "multiparagraph",
+    evidencePrompt: "Web2-to-web3 migration signal, behavior shift, or product pattern pointing onchain",
+  },
+  "Macro trends / Regulation": {
+    goal: "Interpret macro or regulatory developments through a gaming and infrastructure lens",
+    tweetStyle: "multiparagraph",
+    evidencePrompt: "Policy move, market structure change, or macro trend with strategic relevance",
+  },
+  "Vision / Industry Thesis": {
+    goal: "Set a category-defining point of view about where gaming is heading",
+    tweetStyle: "multiparagraph",
+    evidencePrompt: "Long-range thesis, category framing, or operator insight that changes how readers see the market",
+  },
+  "Signing Preannouncement": {
+    goal: "Build anticipation around an upcoming signing without overexplaining it",
+    tweetStyle: "oneliner",
+    evidencePrompt: "Teaser-worthy proof point, partner quality signal, or strategic hint that creates anticipation",
+  },
+  "Mobile gaming": {
+    goal: "Connect mobile distribution and player behavior to the broader platform story",
+    tweetStyle: "hookbullets",
+    evidencePrompt: "Mobile trend, user behavior shift, app store dynamic, or mobile-native growth insight",
+  },
+  "AI gaming": {
+    goal: "Explain how AI changes game design, growth, or live operations in a durable way",
+    tweetStyle: "multiparagraph",
+    evidencePrompt: "AI-enabled gameplay pattern, production shift, or data point linking AI to gaming outcomes",
+  },
+  "Community engagement": {
+    goal: "Add founder voice and direct audience connection without losing strategic relevance",
+    tweetStyle: "oneliner",
+    evidencePrompt: "Community observation, founder lesson, shared win, or audience interaction worth amplifying",
   },
   "Web3 gaming = Future": {
-    goal: "Reinforce the long-term structural shift toward player-owned game economies",
+    goal: "Reinforce the structural inevitability of web3 gaming with conviction",
     tweetStyle: "hookbullets",
-    evidencePrompt: "Structural gaming trend, monetisation unlock, or market inevitability signal",
-  },
-  Ecosystem: {
-    goal: "Show how Immutable's network creates compounding value across games and partners",
-    tweetStyle: "hookbullets",
-    evidencePrompt: "Ecosystem expansion, partner activity, or network effect signal",
-  },
-  "Thought leadership": {
-    goal: "Shape market narrative with a strong point of view",
-    tweetStyle: "multiparagraph",
-    evidencePrompt: "Operator insight, belief shift, or strategic framing",
-  },
-  "Partner Games": {
-    goal: "Use game-specific momentum to make the broader platform story feel real",
-    tweetStyle: "multiparagraph",
-    evidencePrompt: "Partner milestone, launch, growth stat, or player traction signal",
-  },
-  Personal: {
-    goal: "Add founder voice and personality without losing strategic relevance",
-    tweetStyle: "oneliner",
-    evidencePrompt: "Personal observation, founder lesson, or cultural insight",
-  },
-  "Macro Commentary": {
-    goal: "Interpret current market developments through a gaming and infrastructure lens",
-    tweetStyle: "multiparagraph",
-    evidencePrompt: "Fresh market signal, macro shift, or narrative window",
-  },
-  "Social proof": {
-    goal: "Anchor the narrative in credibility with concrete proof points",
-    tweetStyle: "comparison",
-    evidencePrompt: "Metric, milestone, growth rate, or industry validation",
+    evidencePrompt: "Market inevitability signal, player ownership unlock, or trend showing where gaming is going",
   },
 };
 
 export function createEmptyWeeklyPlanSlot(index: number): WeeklyPlanSlot {
-  const contentTopic = DEFAULT_ARCHETYPE_SEQUENCE[index];
-  const defaults = ARCHETYPE_DEFAULTS[contentTopic];
+  const archetype = DEFAULT_ARCHETYPE_SEQUENCE[index];
+  const defaults = ARCHETYPE_DEFAULTS[archetype];
 
   return {
     id: `slot-${index + 1}`,
     slotNumber: index + 1,
     day: DEFAULT_DAY_SEQUENCE[index],
     scheduleLabel: "",
-    contentTopic,
+    archetype,
     goal: defaults.goal,
     topic: "",
     evidence: "",
@@ -261,12 +238,12 @@ export function buildDefaultWeeklyPlanSlots() {
 export function buildDefaultBauWeeklyPlanSlots() {
   return buildDefaultWeeklyPlanSlots().map((slot, index) => {
     const blueprint = DEFAULT_BAU_SLOT_BLUEPRINT[index];
-    const defaults = ARCHETYPE_DEFAULTS[blueprint.contentTopic];
+    const defaults = ARCHETYPE_DEFAULTS[blueprint.archetype];
 
     return {
       ...slot,
       scheduleLabel: blueprint.scheduleLabel,
-      contentTopic: blueprint.contentTopic,
+      archetype: blueprint.archetype,
       goal: defaults.goal,
       tweetStyle: defaults.tweetStyle,
       draftMode: "internal" as const,

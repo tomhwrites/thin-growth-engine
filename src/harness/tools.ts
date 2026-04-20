@@ -23,7 +23,7 @@ const tools: Record<string, ToolDef> = {
   fetchExemplars: {
     name: "fetchExemplars",
     description:
-      "Fetch exemplar tweets to guide drafting. Returns two buckets: formExemplars (match style, for structural reference) and archetypeExemplars (match content topic, for propositional content reference).",
+      "Fetch exemplar tweets to guide drafting. Returns two buckets: formExemplars (match style, for structural reference) and archetypeExemplars (match archetype, for propositional content reference).",
     input_schema: {
       type: "object",
       properties: {
@@ -34,7 +34,7 @@ const tools: Record<string, ToolDef> = {
         },
         topic: {
           type: "string",
-          description: "Content topic to match archetype exemplars against (optional).",
+          description: "Archetype to match archetype exemplars against (optional).",
         },
       },
       required: ["style"],
@@ -44,24 +44,24 @@ const tools: Record<string, ToolDef> = {
       const topic = input.topic ? String(input.topic) : undefined;
       const dbStyle = dbStyleMapping[style] ?? dbStyleMapping.oneliner;
 
-      const format = (rows: { tweet_text: string; content_topic: string; hook_value: string }[]) =>
+      const format = (rows: { tweet_text: string; archetype: string; hook_value: string }[]) =>
         rows
           .map(
             (t, i) =>
-              `Example ${i + 1} (${t.content_topic} / ${t.hook_value}):\n"${t.tweet_text}"`
+              `Example ${i + 1} (Archetype: ${t.archetype}; Hook type: ${t.hook_value || "Unspecified"}):\n"${t.tweet_text}"`
           )
           .join("\n\n");
 
       const formTweets = await prisma.exemplarTweets.findMany({
-        select: { tweet_text: true, content_topic: true, hook_value: true },
+        select: { tweet_text: true, archetype: true, hook_value: true },
         where: { tweet_style: dbStyle, archived: false },
         take: 5,
       });
 
       const archetypeTweets = topic
         ? await prisma.exemplarTweets.findMany({
-            select: { tweet_text: true, content_topic: true, hook_value: true },
-            where: { content_topic: topic, archived: false },
+            select: { tweet_text: true, archetype: true, hook_value: true },
+            where: { archetype: topic, archived: false },
             take: 5,
           })
         : [];

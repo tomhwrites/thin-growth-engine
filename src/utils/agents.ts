@@ -9,7 +9,12 @@ import {
   formatDataPointsForPrompt,
   persistResearchAsDataPoints,
 } from "@/lib/dataPoints";
-import { tweetStyles, type ContentTopic } from "@/utils/tweetConfig";
+import {
+  hookTypeOptions,
+  tweetStyles,
+  type Archetype,
+  type HookType,
+} from "@/utils/tweetConfig";
 import {
   ARCHETYPE_DEFAULTS,
   buildDefaultWeeklyPlanSlots,
@@ -20,11 +25,61 @@ import {
   type WeeklyPlanSlot,
   type WeeklySynthesis,
   WEEKLY_AUDIENCE_OPTIONS,
-  WEEKLY_CONTENT_TOPIC_OPTIONS,
+  WEEKLY_ARCHETYPE_OPTIONS,
   WEEKLY_SLOT_COUNT,
 } from "@/types/weeklyPlanning";
+import type { HookDraft, HookOutput } from "@/types/researchPipeline";
+
+export type { HookDraft, HookOutput } from "@/types/researchPipeline";
 
 export type ExemplarSets = { formExemplars: string; archetypeExemplars: string };
+
+const hookTypeGuide = hookTypeOptions
+  .map((option) => `- ${option.label}: ${option.description}`)
+  .join("\n");
+
+const allowedHookTypes = new Set(hookTypeOptions.map((option) => option.value));
+
+function normalizeHookType(value: unknown): HookType {
+  return allowedHookTypes.has(value as HookType)
+    ? (value as HookType)
+    : "Thesis statement";
+}
+
+function normalizeHookOutput(payload: unknown): HookOutput {
+  const hooks = Array.isArray((payload as { hooks?: unknown })?.hooks)
+    ? (payload as { hooks: unknown[] }).hooks
+    : [];
+
+  return {
+    hooks: hooks
+      .map((hook) => {
+        if (typeof hook === "string") {
+          const text = hook.trim();
+          return text
+            ? {
+                type: "Thesis statement" as HookType,
+                text,
+              }
+            : null;
+        }
+
+        if (hook && typeof hook === "object") {
+          const record = hook as Record<string, unknown>;
+          const text = String(record.text ?? "").trim();
+          if (!text) return null;
+          return {
+            type: normalizeHookType(record.type),
+            text,
+          };
+        }
+
+        return null;
+      })
+      .filter((hook): hook is HookDraft => Boolean(hook))
+      .slice(0, 3),
+  };
+}
 
 // ---------- Immutable business context ----------
 // Injected into the tweet drafter's system prompt so every generated tweet is
@@ -216,11 +271,11 @@ export const dbStyleMapping: Record<string, string> = {
 
 // Fetches exemplar tweets in two buckets:
 // 1. Form exemplars — tweets matching the selected style (for structural reference)
-// 2. Archetype exemplars — tweets matching the selected content topic (for propositional content)
+// 2. Archetype exemplars — tweets matching the selected archetype (for propositional content)
 // When a perfect match (style + topic) exists those tweets count toward both.
 export async function getExemplarsForStyle(
   tweetStyle: string,
-  contentTopic?: string
+  archetype?: string
 ): Promise<{ formExemplars: string; archetypeExemplars: string }> {
   const dbStyle = dbStyleMapping[tweetStyle] || dbStyleMapping.oneliner;
 
@@ -228,7 +283,7 @@ export async function getExemplarsForStyle(
     tweets
       .map(
         (t, i) =>
-          `Example ${i + 1} (${t.content_topic} / ${t.hook_value}):\n"${t.tweet_text}"`
+          `Example ${i + 1} (Archetype: ${t.archetype}; Hook type: ${t.hook_value || "Unspecified"}):\n"${t.tweet_text}"`
       )
       .join("\n\n");
 
@@ -236,25 +291,25 @@ export async function getExemplarsForStyle(
   const formTweets = await prisma.exemplarTweets.findMany({
     select: {
       tweet_text: true,
-      content_topic: true,
+      archetype: true,
       hook_value: true,
     },
     where: { tweet_style: dbStyle, archived: false },
     take: 5,
   });
 
-  if (!contentTopic) {
+  if (!archetype) {
     return { formExemplars: format(formTweets), archetypeExemplars: "" };
   }
 
-  // Fetch archetype exemplars (content topic, any style)
+  // Fetch archetype exemplars (archetype, any style)
   const archetypeTweets = await prisma.exemplarTweets.findMany({
     select: {
       tweet_text: true,
-      content_topic: true,
+      archetype: true,
       hook_value: true,
     },
-    where: { content_topic: contentTopic, archived: false },
+    where: { archetype, archived: false },
     take: 5,
   });
 
@@ -735,10 +790,6 @@ No commentary beyond this structure.`;
 
 // ---------- 5. Hook Agent ----------
 
-export interface HookOutput {
-  hooks: string[];
-}
-
 export async function runHookAgent(
   topic: string,
   narrative: NarrativeOutput
@@ -748,7 +799,12 @@ export async function runHookAgent(
 
 Hook-specific rules:
 - Each hook must be under 60 characters
-- Hooks should create curiosity, urgency, or conviction
+- Choose hook types from this taxonomy:
+${hookTypeGuide}
+- Produce 3 hooks using 3 different hook types when possible
+- If the narrative includes a strong grounded metric or proof point, make one hook a Data hook
+- At least one hook should be either a Thesis statement or a Curiosity Gap
+- Vary length and opening move across the 3 hooks
 - Use crypto Twitter native tone (lowercase ok, abbreviations ok)
 - Each hook should work as a standalone opening line
 - Hooks must keep the reader net bullish on Immutable or the market shift being described
@@ -756,10 +812,14 @@ Hook-specific rules:
 - Do not turn a caveat into a takedown line
 - If there is tension in the input, frame it as an unlock, wedge, or advantage rather than a dismissal
 
-Output format (exactly this, one per line):
-1. [hook]
-2. [hook]
-3. [hook]
+Return valid JSON only in this exact shape:
+{
+  "hooks": [
+    { "type": "Thesis statement", "text": "..." },
+    { "type": "Curiosity Gap", "text": "..." },
+    { "type": "Data", "text": "..." }
+  ]
+}
 
 No commentary.`,
     {
@@ -775,12 +835,21 @@ No commentary.`,
     { includeBusinessContext: true }
   );
 
-  const hooks = raw
-    .split("\n")
-    .map((l) => l.replace(/^\d+\.\s*/, "").trim())
-    .filter(Boolean);
+  try {
+    return normalizeHookOutput(JSON.parse(raw));
+  } catch {
+    const hooks = raw
+      .split("\n")
+      .map((l) => l.replace(/^\d+\.\s*/, "").trim())
+      .filter(Boolean)
+      .slice(0, 3)
+      .map((text) => ({
+        type: "Thesis statement" as HookType,
+        text,
+      }));
 
-  return { hooks };
+    return { hooks };
+  }
 }
 
 // ---------- 6. Tweet Drafter ----------
@@ -794,15 +863,16 @@ export function buildSharedTweetDrafterUserPrompt(
   tweetStyleName: string,
   tweetStyleDescription: string,
   exemplarTweets: ExemplarSets,
-  contentTopic?: string,
+  archetype?: string,
   extraSections: string[] = []
 ): string {
   const sections: string[] = [`Topic: ${topic}`];
-  if (contentTopic) {
+  if (archetype) {
     sections.push(
-      `Content archetype: ${contentTopic} — frame every tweet so it fits this archetype.`
+      `Archetype: ${archetype} — frame every tweet so it fits this archetype.`
     );
   }
+  sections.push(`Hook type taxonomy:\n${hookTypeGuide}`);
   if (narrative.insight) sections.push(`Core insight: ${narrative.insight}`);
   if (narrative.angle) sections.push(`Narrative angle: ${narrative.angle}`);
   if (narrative.supportingData.length > 0) {
@@ -812,7 +882,12 @@ export function buildSharedTweetDrafterUserPrompt(
   }
   if (hooks.hooks.length > 0) {
     sections.push(
-      `Hook options:\n${hooks.hooks.map((h, i) => `${i + 1}. ${h}`).join("\n")}`
+      `Hook options:\n${hooks.hooks
+        .map((hook, i) => `${i + 1}. [${hook.type}] ${hook.text}`)
+        .join("\n")}`
+    );
+    sections.push(
+      "Treat the hook options as examples of different hook types. Preserve hook-type diversity across the final batch rather than repeating the same opening move."
     );
   }
   sections.push(...extraSections.filter(Boolean));
@@ -826,7 +901,7 @@ export function buildSharedTweetDrafterUserPrompt(
     `Generate 6 distinct tweets in the "${tweetStyleName}" style.\nStyle description: ${tweetStyleDescription}`
   );
   sections.push(
-    `Use the material above as raw input. Each tweet should feel like it was written by an informed operator with genuine conviction, not a marketing team. The final read on every tweet should be net bullish on Immutable or the market shift being described. If you mention a tension, resolve it into a stronger positive takeaway.\n\nSeparate each tweet with "||". Output ONLY the tweets.`
+    `Use the material above as raw input. Each tweet should feel like it was written by an informed operator with genuine conviction, not a marketing team. The final read on every tweet should be net bullish on Immutable or the market shift being described. If you mention a tension, resolve it into a stronger positive takeaway. Vary the opening move across the batch by using a mix of hook types rather than repeating the same pattern.\n\nSeparate each tweet with "||". Output ONLY the tweets.`
   );
 
   return sections.join("\n\n");
@@ -847,7 +922,7 @@ export async function runTweetDrafter(
   tweetStyleName: string,
   tweetStyleDescription: string,
   exemplarTweets: ExemplarSets,
-  contentTopic?: string,
+  archetype?: string,
   options: { skipCritic?: boolean; extraSections?: string[] } = {}
 ): Promise<string[]> {
   const prompt = buildSharedTweetDrafterUserPrompt(
@@ -857,7 +932,7 @@ export async function runTweetDrafter(
     tweetStyleName,
     tweetStyleDescription,
     exemplarTweets,
-    contentTopic,
+    archetype,
     options.extraSections
   );
 
@@ -883,7 +958,7 @@ export async function runTweetDrafter(
       tweetStyleName,
       tweetStyleDescription,
       exemplarTweets,
-      contentTopic
+      archetype
     );
   } catch (err) {
     console.error("[Critic] Failed, returning raw drafts:", err);
@@ -904,7 +979,7 @@ export async function runTweetCritic(
   tweetStyleName: string,
   tweetStyleDescription: string,
   exemplarTweets: ExemplarSets,
-  contentTopic?: string
+  archetype?: string
 ): Promise<string[]> {
   if (drafts.length < 3) return drafts;
 
@@ -940,7 +1015,7 @@ REWRITES:
   );
 
   const sections: string[] = [`Topic: ${topic}`];
-  if (contentTopic) sections.push(`Content archetype: ${contentTopic}`);
+  if (archetype) sections.push(`Archetype: ${archetype}`);
   if (narrative.insight) sections.push(`Core insight: ${narrative.insight}`);
   if (narrative.angle) sections.push(`Narrative angle: ${narrative.angle}`);
   sections.push(`Style: ${tweetStyleName} — ${tweetStyleDescription}`);
@@ -993,7 +1068,7 @@ export async function runStandaloneTweetCriticRewrite(
   tweetStyleName: string,
   tweetStyleDescription: string,
   exemplarTweets: ExemplarSets,
-  contentTopic?: string
+  archetype?: string
 ): Promise<{ rationale: string; rewrittenTweet: string }> {
   const system = buildTweetAgentSystemPrompt(
     `You are a ruthless Twitter editor reviewing a single Immutable tweet draft.
@@ -1017,7 +1092,7 @@ REWRITE:
   );
 
   const sections: string[] = [`Topic: ${topic}`];
-  if (contentTopic) sections.push(`Content archetype: ${contentTopic}`);
+  if (archetype) sections.push(`Archetype: ${archetype}`);
   sections.push(`Style: ${tweetStyleName} — ${tweetStyleDescription}`);
   if (exemplarTweets.formExemplars) {
     sections.push(`Form exemplars to match:\n${exemplarTweets.formExemplars}`);
@@ -1108,11 +1183,11 @@ function sanitizeAudienceLens(value: unknown): AudienceLens {
     : "market_observer";
 }
 
-function sanitizeContentTopic(value: unknown): ContentTopic {
-  const fallback = WEEKLY_CONTENT_TOPIC_OPTIONS[0]?.value || "Thought leadership";
-  const allowed = new Set(WEEKLY_CONTENT_TOPIC_OPTIONS.map((option) => option.value));
-  return allowed.has(value as ContentTopic)
-    ? (value as ContentTopic)
+function sanitizeArchetype(value: unknown): Archetype {
+  const fallback = WEEKLY_ARCHETYPE_OPTIONS[0]?.value || "Payments";
+  const allowed = new Set(WEEKLY_ARCHETYPE_OPTIONS.map((option) => option.value));
+  return allowed.has(value as Archetype)
+    ? (value as Archetype)
     : fallback;
 }
 
@@ -1170,21 +1245,21 @@ function normalizeWeeklyPlanSlots(payload: unknown): WeeklyPlanSlot[] {
   const slots = Array.isArray(payload) ? payload : [];
 
   const allowedArchetypeSet = new Set(
-    WEEKLY_CONTENT_TOPIC_OPTIONS.map((option) => option.value)
+    WEEKLY_ARCHETYPE_OPTIONS.map((option) => option.value)
   );
 
   return templates.map((template, index) => {
     const item = (slots[index] ?? {}) as Record<string, unknown>;
-    const contentTopic = sanitizeContentTopic(item.contentTopic ?? template.contentTopic);
-    const archetypeDefaults = ARCHETYPE_DEFAULTS[contentTopic];
+    const archetype = sanitizeArchetype(item.archetype ?? item.contentTopic ?? template.archetype);
+    const archetypeDefaults = ARCHETYPE_DEFAULTS[archetype];
     const rawScheduleLabel = String(item.scheduleLabel ?? "").trim();
-    const scheduleLabel = rawScheduleLabel || contentTopic;
+    const scheduleLabel = rawScheduleLabel || archetype;
     const isBAU = allowedArchetypeSet.has(scheduleLabel as any);
 
     return {
       ...template,
       scheduleLabel,
-      contentTopic,
+      archetype,
       goal: archetypeDefaults.goal,
       topic: "",
       evidence: "",
@@ -1213,7 +1288,7 @@ function findMatchingNarrative(
 ): WeeklyNarrative | undefined {
   const narrativeTopic =
     slot.topic.trim() ||
-    (slot.scheduleLabel.trim() !== slot.contentTopic
+    (slot.scheduleLabel.trim() !== slot.archetype
       ? slot.scheduleLabel.trim()
       : "");
 
@@ -1234,7 +1309,7 @@ function isWeeklySlotDraftable(slot: WeeklyPlanSlot): boolean {
 }
 
 function getWeeklySlotEffectiveTopic(slot: WeeklyPlanSlot): string {
-  return slot.topic.trim() || slot.scheduleLabel.trim() || slot.contentTopic;
+  return slot.topic.trim() || slot.scheduleLabel.trim() || slot.archetype;
 }
 
 function buildWeeklySlotAdditionalSections(slot: WeeklyPlanSlot) {
@@ -1318,10 +1393,10 @@ export async function runWeeklySlotPlanner(
   const templateSlots = buildDefaultWeeklyPlanSlots().map((slot) => ({
     slotNumber: slot.slotNumber,
     day: slot.day,
-    contentTopic: slot.contentTopic,
+    archetype: slot.archetype,
   }));
 
-  const allowedArchetypes = WEEKLY_CONTENT_TOPIC_OPTIONS.map((option) => option.value);
+  const allowedArchetypes = WEEKLY_ARCHETYPE_OPTIONS.map((option) => option.value);
 
   const system = `You are planning a ${WEEKLY_SLOT_COUNT}-tweet weekly schedule for Immutable's co-founder account.
 
@@ -1332,7 +1407,7 @@ Return valid JSON only — an array of exactly ${WEEKLY_SLOT_COUNT} objects in s
 Each object has exactly TWO fields:
 {
   "scheduleLabel": "string (max 4 words)",
-  "contentTopic": "one of the allowed archetypes"
+  "archetype": "one of the allowed archetypes"
 }
 
 IMPORTANT — there are only two kinds of slots:
@@ -1385,7 +1460,7 @@ async function runWeeklySlotResearchDraftAgent(
   slot: WeeklyPlanSlot
 ): Promise<WeeklySlotDraft> {
   const style = tweetStyles[slot.tweetStyle] || tweetStyles.catchphrase;
-  const exemplarText = await getExemplarsForStyle(slot.tweetStyle, slot.contentTopic);
+  const exemplarText = await getExemplarsForStyle(slot.tweetStyle, slot.archetype);
   const matchingNarrative = findMatchingNarrative(synthesis, slot);
   const effectiveTopic = getWeeklySlotEffectiveTopic(slot);
   const researchTopic = [effectiveTopic, slot.additionalContext].filter(Boolean).join(". ");
@@ -1414,7 +1489,7 @@ async function runWeeklySlotResearchDraftAgent(
     style.name,
     style.description,
     exemplarText,
-    slot.contentTopic,
+    slot.archetype,
     {
       extraSections: buildWeeklySlotAdditionalSections(slot),
     }
@@ -1433,7 +1508,7 @@ async function runWeeklySlotInternalDraftAgent(
   slot: WeeklyPlanSlot
 ): Promise<WeeklySlotDraft> {
   const style = tweetStyles[slot.tweetStyle] || tweetStyles.catchphrase;
-  const exemplarText = await getExemplarsForStyle(slot.tweetStyle, slot.contentTopic);
+  const exemplarText = await getExemplarsForStyle(slot.tweetStyle, slot.archetype);
   const matchingNarrative = findMatchingNarrative(synthesis, slot);
   const effectiveTopic = getWeeklySlotEffectiveTopic(slot);
   const metrics = await runMetricResearchAgent(
@@ -1462,7 +1537,7 @@ async function runWeeklySlotInternalDraftAgent(
     style.name,
     style.description,
     exemplarText,
-    slot.contentTopic,
+    slot.archetype,
     {
       extraSections: buildWeeklySlotAdditionalSections(slot),
     }

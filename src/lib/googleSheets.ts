@@ -18,6 +18,11 @@ import type { sheets_v4 } from "googleapis";
 
 let cachedClient: sheets_v4.Sheets | null = null;
 
+type SheetRecord = {
+  rowNumber: number;
+  values: Record<string, string>;
+};
+
 async function getSheetsClient(): Promise<sheets_v4.Sheets> {
   if (cachedClient) return cachedClient;
 
@@ -105,6 +110,14 @@ export async function pushTableToSheet(
 export async function pullEditsFromSheet(
   tabName: string
 ): Promise<Record<string, string>[]> {
+  const { rows } = await pullSheetRecords(tabName);
+  return rows.map((row) => row.values);
+}
+
+export async function pullSheetRecords(tabName: string): Promise<{
+  header: string[];
+  rows: SheetRecord[];
+}> {
   const sheets = await getSheetsClient();
   const spreadsheetId = getSpreadsheetId();
 
@@ -113,9 +126,9 @@ export async function pullEditsFromSheet(
     range: tabName,
   });
   const rows = res.data.values || [];
-  if (rows.length < 2) return [];
+  if (rows.length < 2) return { header: [], rows: [] };
   const header = rows[0] as string[];
-  const out: Record<string, string>[] = [];
+  const out: SheetRecord[] = [];
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i];
     if (!row || row.every((v) => v == null || String(v).trim() === "")) continue;
@@ -123,9 +136,51 @@ export async function pullEditsFromSheet(
     for (let j = 0; j < header.length; j++) {
       rec[header[j]] = (row[j] ?? "").toString();
     }
-    out.push(rec);
+    out.push({ rowNumber: i + 1, values: rec });
   }
-  return out;
+  return { header, rows: out };
+}
+
+function columnNumberToName(columnNumber: number): string {
+  let current = columnNumber;
+  let name = "";
+
+  while (current > 0) {
+    const remainder = (current - 1) % 26;
+    name = String.fromCharCode(65 + remainder) + name;
+    current = Math.floor((current - 1) / 26);
+  }
+
+  return name;
+}
+
+export async function writeSheetColumnValues(
+  tabName: string,
+  header: string[],
+  columnName: string,
+  updates: { rowNumber: number; value: string }[]
+): Promise<void> {
+  if (updates.length === 0) return;
+
+  const columnIndex = header.indexOf(columnName);
+  if (columnIndex === -1) {
+    throw new Error(`Column '${columnName}' not found in tab '${tabName}'`);
+  }
+
+  const sheets = await getSheetsClient();
+  const spreadsheetId = getSpreadsheetId();
+  const columnLetter = columnNumberToName(columnIndex + 1);
+
+  await sheets.spreadsheets.values.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      valueInputOption: "RAW",
+      data: updates.map(({ rowNumber, value }) => ({
+        range: `${tabName}!${columnLetter}${rowNumber}`,
+        values: [[value]],
+      })),
+    },
+  });
 }
 
 /** Parse a "TRUE"/"FALSE"/"true"/"1" cell into a boolean. */

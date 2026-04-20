@@ -6,7 +6,7 @@ params:
   - TOPIC (required) — the subject area
   - NARRATIVE (required) — object from stage 4, shaped { insight, angle, supportingData: [{ claim, sourceUrl }] }
   - STYLE (required) — same STYLE passed to draft-tweet
-  - CONTENT_TOPIC (optional) — content archetype used for exemplar fetch
+  - ARCHETYPE (optional) — archetype used for exemplar fetch
 context: [_context/business.md, _context/tweet-voice.md]
 tools: [fetchExemplars]
 max_tokens: 2500
@@ -24,7 +24,7 @@ You are a ruthless Twitter editor reviewing tweets written on behalf of Immutabl
 # Process
 
 ## Step 1 — Fetch exemplars
-Call `fetchExemplars({ style: STYLE, topic: CONTENT_TOPIC ?? TOPIC })` so you can benchmark drafts against the target form and archetype.
+Call `fetchExemplars({ style: STYLE, topic: ARCHETYPE ?? TOPIC })` so you can benchmark drafts against the target form and archetype.
 
 ## Step 2 — Score each draft (1–10 per axis, 40 max)
 - **Hook** — does the opening line earn the scroll-stop?

@@ -12,7 +12,7 @@ import {
   type WeeklyPlanSlot,
   type WeeklySlotDraft,
   type WeeklySynthesis,
-  WEEKLY_CONTENT_TOPIC_OPTIONS,
+  WEEKLY_ARCHETYPE_OPTIONS,
   WEEKLY_DRAFT_MODE_OPTIONS,
 } from "@/types/weeklyPlanning";
 
@@ -35,7 +35,7 @@ function isDraftableWeeklySlot(slot: WeeklyPlanSlot) {
 }
 
 function getWeeklySlotDraftLabel(slot: WeeklyPlanSlot) {
-  return slot.topic.trim() || slot.scheduleLabel.trim() || slot.contentTopic;
+  return slot.topic.trim() || slot.scheduleLabel.trim() || slot.archetype;
 }
 
 function WeeklyPlanner() {
@@ -181,7 +181,7 @@ function WeeklyPlanner() {
         planData.slots.map((slot, index) => {
           const currentSlot = currentSlots[index];
           const currentDefaultGoal = currentSlot
-            ? ARCHETYPE_DEFAULTS[currentSlot.contentTopic].goal
+            ? ARCHETYPE_DEFAULTS[currentSlot.archetype].goal
             : "";
 
           return {
@@ -217,18 +217,18 @@ function WeeklyPlanner() {
       currentSlots.map((slot) => {
         if (slot.id !== slotId) return slot;
 
-        if (field === "contentTopic") {
-          const nextContentTopic = value as WeeklyPlanSlot["contentTopic"];
-          const defaults = ARCHETYPE_DEFAULTS[nextContentTopic];
+        if (field === "archetype") {
+          const nextArchetype = value as WeeklyPlanSlot["archetype"];
+          const defaults = ARCHETYPE_DEFAULTS[nextArchetype];
           return {
             ...slot,
-            contentTopic: nextContentTopic,
+            archetype: nextArchetype,
             goal:
-              slot.goal === ARCHETYPE_DEFAULTS[slot.contentTopic].goal
+              slot.goal === ARCHETYPE_DEFAULTS[slot.archetype].goal
                 ? defaults.goal
                 : slot.goal,
             tweetStyle:
-              slot.tweetStyle === ARCHETYPE_DEFAULTS[slot.contentTopic].tweetStyle
+              slot.tweetStyle === ARCHETYPE_DEFAULTS[slot.archetype].tweetStyle
                 ? defaults.tweetStyle
                 : slot.tweetStyle,
           };
@@ -239,7 +239,7 @@ function WeeklyPlanner() {
           const shouldSyncScheduleLabel =
             !slot.scheduleLabel.trim() ||
             slot.scheduleLabel.trim() === slot.topic.trim() ||
-            slot.scheduleLabel.trim() === slot.contentTopic;
+            slot.scheduleLabel.trim() === slot.archetype;
 
           return {
             ...slot,
@@ -586,17 +586,17 @@ function WeeklyPlanner() {
                   </Field>
                   <Field label="Archetype">
                     <select
-                      value={slot.contentTopic}
+                      value={slot.archetype}
                       onChange={(event) =>
                         updateSlot(
                           slot.id,
-                          "contentTopic",
-                          event.target.value as WeeklyPlanSlot["contentTopic"]
+                          "archetype",
+                          event.target.value as WeeklyPlanSlot["archetype"]
                         )
                       }
                       className="w-full rounded-lg border border-gray-600 bg-white/10 px-3 py-2 text-white outline-none focus:border-purple-500"
                     >
-                      {WEEKLY_CONTENT_TOPIC_OPTIONS.map((option) => (
+                      {WEEKLY_ARCHETYPE_OPTIONS.map((option) => (
                         <option key={option.value} value={option.value} className="bg-gray-900">
                           {option.label}
                         </option>
@@ -659,7 +659,7 @@ function WeeklyPlanner() {
                       onChange={(event) =>
                         updateSlot(slot.id, "evidence", event.target.value)
                       }
-                      placeholder={ARCHETYPE_DEFAULTS[slot.contentTopic].evidencePrompt}
+                      placeholder={ARCHETYPE_DEFAULTS[slot.archetype].evidencePrompt}
                       className="min-h-[96px] w-full rounded-lg border border-gray-600 bg-white/10 px-3 py-2 text-white outline-none placeholder:text-gray-500 focus:border-purple-500"
                     />
                   </Field>
@@ -825,12 +825,12 @@ function WeeklyTimelineView({
                   Slot {slot.slotNumber}
                 </div>
                 <p className="mt-1 text-sm font-medium text-white">
-                  {slot.scheduleLabel || slot.contentTopic}
+                  {slot.scheduleLabel || slot.archetype}
                 </p>
                 {slot.scheduleLabel.trim() &&
-                  slot.scheduleLabel.trim() !== slot.contentTopic && (
+                  slot.scheduleLabel.trim() !== slot.archetype && (
                     <p className="mt-1 text-xs text-gray-400">
-                      {slot.contentTopic}
+                      {slot.archetype}
                     </p>
                   )}
               </div>
@@ -864,7 +864,7 @@ function WeeklyListView({
                   key={slot.id}
                   className="rounded-full border border-gray-600 px-2 py-1 text-[11px] text-gray-300"
                 >
-                  Slot {slot.slotNumber} · {slot.contentTopic}
+                  Slot {slot.slotNumber} · {slot.archetype}
                 </span>
               ))}
             </div>

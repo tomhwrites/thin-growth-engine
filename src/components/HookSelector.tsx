@@ -1,9 +1,11 @@
 "use client";
 
+import type { HookDraft } from "@/types/researchPipeline";
+
 interface HookSelectorProps {
-  hooks: string[];
-  selectedHook: string | null;
-  onSelectHook: (hook: string) => void;
+  hooks: HookDraft[];
+  selectedHook: HookDraft | null;
+  onSelectHook: (hook: HookDraft) => void;
 }
 
 export default function HookSelector({
@@ -25,7 +27,7 @@ export default function HookSelector({
           <div
             key={index}
             className={`p-5 rounded-xl border-2 cursor-pointer transition-all duration-200 ${
-              selectedHook === hook
+              selectedHook?.type === hook.type && selectedHook?.text === hook.text
                 ? "border-blue-500 bg-blue-50 shadow-md transform scale-[1.02]"
                 : "border-gray-200 bg-white hover:border-blue-300 hover:shadow-sm"
             }`}
@@ -34,12 +36,12 @@ export default function HookSelector({
             <div className="flex items-center">
               <div
                 className={`w-5 h-5 rounded-full mr-3 flex-shrink-0 ${
-                  selectedHook === hook
+                  selectedHook?.type === hook.type && selectedHook?.text === hook.text
                     ? "bg-blue-500"
                     : "border-2 border-gray-300"
                 }`}
               >
-                {selectedHook === hook && (
+                {selectedHook?.type === hook.type && selectedHook?.text === hook.text && (
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
                     className="h-5 w-5 text-white"
@@ -54,7 +56,12 @@ export default function HookSelector({
                   </svg>
                 )}
               </div>
-              <p className="text-gray-800 font-medium">&quot;{hook}&quot;</p>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-gray-500">
+                  {hook.type}
+                </p>
+                <p className="text-gray-800 font-medium">&quot;{hook.text}&quot;</p>
+              </div>
             </div>
           </div>
         ))}

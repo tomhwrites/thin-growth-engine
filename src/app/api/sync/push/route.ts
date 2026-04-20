@@ -1,6 +1,6 @@
 // app/api/sync/push/route.ts
-// Push DB → Google Sheets. Overwrites the data_points and exemplar_tweets tabs
-// with current DB state. Safe to call repeatedly; idempotent.
+// Push DB → Google Sheets. data_points always pushes. exemplar_tweets only
+// pushes when explicitly requested so the sheet can remain the source of truth.
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -24,32 +24,39 @@ const DATA_POINTS_COLUMNS = [
 const EXEMPLARS_COLUMNS = [
   "id",
   "tweet_text",
-  "content_topic",
-  "subtopic",
+  "archetype",
   "tweet_style",
   "hook_value",
-  "isThread",
   "archived",
   "createdAt",
   "updatedAt",
 ];
 
-export async function POST() {
+function shouldPushExemplars(request: Request): boolean {
+  return new URL(request.url).searchParams.get("includeExemplars") === "true";
+}
+
+export async function POST(request: Request) {
   try {
-    const [dataPoints, exemplars] = await Promise.all([
-      prisma.dataPoints.findMany({ orderBy: { id: "asc" } }),
-      prisma.exemplarTweets.findMany({ orderBy: { id: "asc" } }),
-    ]);
+    const includeExemplars = shouldPushExemplars(request);
+    const dataPoints = await prisma.dataPoints.findMany({ orderBy: { id: "asc" } });
 
     await pushTableToSheet("data_points", DATA_POINTS_COLUMNS, dataPoints);
-    await pushTableToSheet("exemplar_tweets", EXEMPLARS_COLUMNS, exemplars);
+
+    let exemplarsPushed = 0;
+    if (includeExemplars) {
+      const exemplars = await prisma.exemplarTweets.findMany({ orderBy: { id: "asc" } });
+      await pushTableToSheet("exemplar_tweets", EXEMPLARS_COLUMNS, exemplars);
+      exemplarsPushed = exemplars.length;
+    }
 
     return NextResponse.json({
       ok: true,
       pushed: {
         data_points: dataPoints.length,
-        exemplar_tweets: exemplars.length,
+        exemplar_tweets: exemplarsPushed,
       },
+      skipped: includeExemplars ? [] : ["exemplar_tweets"],
     });
   } catch (e: any) {
     console.error("[sync/push]", e);
@@ -61,6 +68,6 @@ export async function POST() {
 }
 
 // Also accept GET so Vercel cron can hit it.
-export async function GET() {
-  return POST();
+export async function GET(request: Request) {
+  return POST(request);
 }

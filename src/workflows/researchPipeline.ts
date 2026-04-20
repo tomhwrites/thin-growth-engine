@@ -20,6 +20,7 @@ export interface StageRequest {
   stage: PipelineStage;
   topic: string;
   tweetStyle?: string;
+  archetype?: string;
   contentTopic?: string;
   beliefs?: Belief[];
   evidenceNeeds?: EvidenceNeed[];
@@ -31,6 +32,7 @@ export interface StageRequest {
 export interface ChainRequest {
   topic: string;
   tweetStyle?: string;
+  archetype?: string;
   contentTopic?: string;
 }
 
@@ -72,7 +74,7 @@ async function runDraftStage(
   narrative: NarrativeOutput,
   hooks: HookOutput,
   tweetStyle = "catchphrase",
-  contentTopic?: string,
+  archetype?: string,
   opts: { verbose?: boolean } = {}
 ) {
   const draftArgs = withAliases({
@@ -80,7 +82,8 @@ async function runDraftStage(
     narrative,
     hooks,
     style: tweetStyle,
-    contentTopic,
+    archetype,
+    contentTopic: archetype,
   });
 
   const draftResult = await executeSkill<DraftSkillOutput>("draft-tweet", draftArgs, opts);
@@ -89,7 +92,8 @@ async function runDraftStage(
     narrative,
     drafts: draftResult.output.drafts,
     style: tweetStyle,
-    contentTopic,
+    archetype,
+    contentTopic: archetype,
   });
   const criticResult = await executeSkill<CriticSkillOutput>("critic", criticArgs, opts);
 
@@ -175,7 +179,7 @@ export async function runResearchPipelineStage(
         input.narrative,
         input.hooks,
         input.tweetStyle,
-        input.contentTopic,
+        input.archetype ?? input.contentTopic,
         opts
       );
       return { tweets: result.tweets, warnings: result.warnings };
@@ -192,6 +196,7 @@ export async function runResearchPipelineChain(
 ) {
   const topic = input.topic || "Web3 gaming";
   const tweetStyle = input.tweetStyle || "catchphrase";
+  const archetype = input.archetype ?? input.contentTopic;
 
   const belief = await executeSkill<BeliefSkillOutput>("belief", withAliases({ topic }), opts);
   const evidence = await executeSkill<EvidenceSkillOutput>(
@@ -219,14 +224,14 @@ export async function runResearchPipelineChain(
     narrative.output,
     hook.output,
     tweetStyle,
-    input.contentTopic,
+    archetype,
     opts
   );
 
   return {
     topic,
     tweetStyle,
-    contentTopic: input.contentTopic ?? null,
+    archetype: archetype ?? null,
     beliefs: belief.output.beliefs,
     evidenceNeeds: evidence.output.evidenceNeeds,
     research: research.output.research,

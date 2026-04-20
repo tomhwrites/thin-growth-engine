@@ -51,7 +51,7 @@ export async function POST(request: Request) {
 
     const exemplarText = await getExemplarsForStyle(
       requestData.tweetStyle as string,
-      requestData.contentTopic
+      requestData.archetype ?? requestData.contentTopic
     );
 
     // Adapt the direct-path inputs into the shared drafter's shape so both
@@ -70,7 +70,7 @@ export async function POST(request: Request) {
       selectedStyle.name,
       selectedStyle.description,
       exemplarText,
-      requestData.contentTopic
+      requestData.archetype ?? requestData.contentTopic
     );
 
     return NextResponse.json({ tweets });

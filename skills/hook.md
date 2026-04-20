@@ -21,7 +21,15 @@ Given TOPIC and NARRATIVE, produce **exactly 3** distinct hooks.
 
 - Each hook ≤ 60 characters.
 - Each hook must work as a standalone opening line.
-- Create curiosity, urgency, or conviction.
+- Use this hook taxonomy:
+  - `Thesis statement` — direct conviction-led claim
+  - `Curiosity Gap` — open loop that makes the reader want the next line
+  - `Short` — blunt, compressed opening with very few words
+  - `Long` — longer framing-led opening line
+  - `Data` — grounded number, metric, or proof-point-led opening
+- Produce 3 hooks using 3 different hook types when possible.
+- If the narrative contains a strong grounded metric, make one hook a `Data` hook.
+- Make at least one hook either a `Thesis statement` or a `Curiosity Gap`.
 - Crypto Twitter native tone — lowercase ok, abbreviations ok.
 - Keep the reader **net bullish** on Immutable or the market shift being described.
 - If there is tension in the input, frame it as an unlock, wedge, or advantage — never a dismissal or takedown.
@@ -52,9 +60,9 @@ Return **only** valid JSON, no prose before or after:
 ```json
 {
   "hooks": [
-    "hook 1",
-    "hook 2",
-    "hook 3"
+    { "type": "Thesis statement", "text": "hook 1" },
+    { "type": "Curiosity Gap", "text": "hook 2" },
+    { "type": "Data", "text": "hook 3" }
   ]
 }
 ```

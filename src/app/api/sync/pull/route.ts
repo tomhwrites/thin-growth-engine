@@ -4,7 +4,13 @@
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { pullEditsFromSheet, parseBool, parseList } from "@/lib/googleSheets";
+import {
+  pullEditsFromSheet,
+  pullSheetRecords,
+  writeSheetColumnValues,
+  parseBool,
+  parseList,
+} from "@/lib/googleSheets";
 
 function parseIntOrNull(v: string | undefined): number | null {
   if (!v) return null;
@@ -78,57 +84,117 @@ async function pullDataPoints(): Promise<{
 async function pullExemplarTweets(): Promise<{
   created: number;
   updated: number;
+  deleted: number;
   skipped: number;
+  ids_backfilled: number;
 }> {
-  const rows = await pullEditsFromSheet("exemplar_tweets");
+  const { header, rows } = await pullSheetRecords("exemplar_tweets");
+  const requiredColumns = ["id", "tweet_text", "tweet_style"];
   let created = 0;
   let updated = 0;
+  let deleted = 0;
   let skipped = 0;
-  for (const r of rows) {
+  let idsBackfilled = 0;
+
+  for (const column of requiredColumns) {
+    if (!header.includes(column)) {
+      throw new Error(`Missing required exemplar_tweets column: ${column}`);
+    }
+  }
+  if (!header.includes("archetype") && !header.includes("content_topic")) {
+    throw new Error("Missing required exemplar_tweets column: archetype");
+  }
+
+  const keepIds = new Set<number>();
+  const seenSheetIds = new Set<number>();
+  const pendingIdWrites: { rowNumber: number; value: string }[] = [];
+
+  for (const row of rows) {
+    const r = row.values;
     const id = parseIntOrNull(r.id);
     const tweetText = (r.tweet_text ?? "").trim();
-    const contentTopic = (r.content_topic ?? "").trim();
+    const archetype = (r.archetype ?? r.content_topic ?? "").trim();
     const tweetStyle = (r.tweet_style ?? "").trim();
 
-    if (!tweetText || !contentTopic || !tweetStyle) {
+    if (!tweetText || !archetype || !tweetStyle) {
       skipped++;
       continue;
     }
 
-    const data = {
-      tweet_text: tweetText,
-      content_topic: contentTopic,
-      subtopic: r.subtopic ?? "",
-      tweet_style: tweetStyle,
-      hook_value: r.hook_value ?? "",
-      isThread: parseBool(r.isThread),
-      archived: parseBool(r.archived),
-    };
+    if (id && seenSheetIds.has(id)) {
+      skipped++;
+      continue;
+    }
+
+      const data = {
+        tweet_text: tweetText,
+        archetype,
+        subtopic: r.subtopic ?? "",
+        tweet_style: tweetStyle,
+        hook_value: r.hook_value ?? "",
+        archived: parseBool(r.archived),
+      };
 
     try {
       if (id) {
+        seenSheetIds.add(id);
         const existing = await prisma.exemplarTweets.findUnique({ where: { id } });
-        if (!existing) {
-          skipped++;
-          continue;
+        if (existing) {
+          await prisma.exemplarTweets.update({
+            where: { id },
+            data,
+          });
+          updated++;
+        } else {
+          await prisma.exemplarTweets.create({
+            data: { id, ...data },
+          });
+          created++;
         }
-
-        await prisma.exemplarTweets.update({
-          where: { id },
-          data,
-        });
-
-        updated++;
+        keepIds.add(id);
         continue;
       }
 
-      await prisma.exemplarTweets.create({ data });
+      const createdRow = await prisma.exemplarTweets.create({ data });
       created++;
+      keepIds.add(createdRow.id);
+      pendingIdWrites.push({
+        rowNumber: row.rowNumber,
+        value: String(createdRow.id),
+      });
     } catch {
       skipped++;
     }
   }
-  return { created, updated, skipped };
+
+  const deleteResult =
+    keepIds.size > 0
+      ? await prisma.exemplarTweets.deleteMany({
+          where: { id: { notIn: Array.from(keepIds) } },
+        })
+      : await prisma.exemplarTweets.deleteMany();
+  deleted = deleteResult.count;
+
+  await prisma.$executeRawUnsafe(`
+    SELECT setval(
+      pg_get_serial_sequence('"ExemplarTweets"', 'id'),
+      GREATEST(COALESCE((SELECT MAX(id) FROM "ExemplarTweets"), 1), 1),
+      true
+    )
+  `);
+
+  if (pendingIdWrites.length > 0) {
+    await writeSheetColumnValues("exemplar_tweets", header, "id", pendingIdWrites);
+    idsBackfilled = pendingIdWrites.length;
+  }
+
+  return {
+    created,
+    updated,
+    deleted,
+    skipped,
+    ids_backfilled: idsBackfilled,
+  };
 }
 
 export async function POST() {

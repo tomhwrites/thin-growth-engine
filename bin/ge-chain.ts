@@ -40,7 +40,7 @@ async function main() {
   const topic = args.topic;
 
   if (!topic) {
-    console.error("Usage: ge-chain --topic='Immutable Play user acquisition' [--style=catchphrase] [--contentTopic='Product'] [-v]");
+    console.error("Usage: ge-chain --topic='Immutable Play user acquisition' [--style=catchphrase] [--archetype='Payments'] [-v]");
     process.exit(1);
   }
 
@@ -48,7 +48,7 @@ async function main() {
     {
       topic,
       tweetStyle: args.style ?? args.tweetStyle,
-      contentTopic: args.contentTopic,
+      archetype: args.archetype ?? args.contentTopic,
     },
     { verbose }
   );

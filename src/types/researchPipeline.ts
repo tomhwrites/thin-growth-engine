@@ -1,3 +1,5 @@
+import type { HookType } from "@/utils/tweetConfig";
+
 export interface Belief {
   belief: string;
   whyItMatters: string;
@@ -37,6 +39,11 @@ export interface NarrativeOutput {
   supportingData: SupportingDatum[];
 }
 
+export interface HookDraft {
+  type: HookType;
+  text: string;
+}
+
 export interface HookOutput {
-  hooks: string[];
+  hooks: HookDraft[];
 }

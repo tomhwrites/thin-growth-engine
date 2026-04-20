@@ -4,6 +4,49 @@ export interface TweetStyle {
   description: string;
 }
 
+export type HookType =
+  | "Thesis statement"
+  | "Curiosity Gap"
+  | "Short"
+  | "Long"
+  | "Data";
+
+export const hookTypeDescriptions: Record<HookType, string> = {
+  "Thesis statement": "A direct conviction-led claim that states the core point up front.",
+  "Curiosity Gap": "An open loop that makes the reader want the next sentence.",
+  Short: "A blunt, compact opening with very few words.",
+  Long: "A more developed opening line that carries extra framing or texture.",
+  Data: "A hook led by a specific grounded number, metric, or proof point.",
+};
+
+export const hookTypeOptions: { value: HookType; label: string; description: string }[] = [
+  {
+    value: "Thesis statement",
+    label: "Thesis statement",
+    description: hookTypeDescriptions["Thesis statement"],
+  },
+  {
+    value: "Curiosity Gap",
+    label: "Curiosity Gap",
+    description: hookTypeDescriptions["Curiosity Gap"],
+  },
+  {
+    value: "Short",
+    label: "Short",
+    description: hookTypeDescriptions.Short,
+  },
+  {
+    value: "Long",
+    label: "Long",
+    description: hookTypeDescriptions.Long,
+  },
+  {
+    value: "Data",
+    label: "Data",
+    description: hookTypeDescriptions.Data,
+  },
+];
+
 export const tweetStyles: Record<string, TweetStyle> = {
   catchphrase: {
     name: "Catch Phrase Tweet",
@@ -47,32 +90,46 @@ export const tweetStyles: Record<string, TweetStyle> = {
   },
 };
 
-export type ContentTopic =
-  | "Product"
-  | "Web3 gaming = Future"
-  | "Ecosystem"
-  | "Thought leadership"
-  | "Partner Games"
-  | "Personal"
-  | "Macro Commentary"
-  | "Social proof";
+export type Archetype =
+  | "Payments"
+  | "Identity / Attribution"
+  | "New combined Web3 thesis"
+  | "Product Launch / Update"
+  | "Partner Game Announcement"
+  | "Partner Traction / Proof Point"
+  | "Ecosystem Traction"
+  | "Web2 will become Web3"
+  | "Macro trends / Regulation"
+  | "Vision / Industry Thesis"
+  | "Signing Preannouncement"
+  | "Mobile gaming"
+  | "AI gaming"
+  | "Community engagement"
+  | "Web3 gaming = Future";
 
-export const CONTENT_TOPIC_ANY = "";
+export const ANY_ARCHETYPE = "";
 
-export const contentTopicOptions: { value: ContentTopic | ""; label: string }[] = [
-  { value: CONTENT_TOPIC_ANY, label: "Any (no archetype filter)" },
-  { value: "Product", label: "Product" },
+export const archetypeOptions: { value: Archetype | ""; label: string }[] = [
+  { value: ANY_ARCHETYPE, label: "Any (no archetype filter)" },
+  { value: "Payments", label: "Payments" },
+  { value: "Identity / Attribution", label: "Identity / Attribution" },
+  { value: "New combined Web3 thesis", label: "New combined Web3 thesis" },
+  { value: "Product Launch / Update", label: "Product Launch / Update" },
+  { value: "Partner Game Announcement", label: "Partner Game Announcement" },
+  { value: "Partner Traction / Proof Point", label: "Partner Traction / Proof Point" },
+  { value: "Ecosystem Traction", label: "Ecosystem Traction" },
+  { value: "Web2 will become Web3", label: "Web2 will become Web3" },
+  { value: "Macro trends / Regulation", label: "Macro trends / Regulation" },
+  { value: "Vision / Industry Thesis", label: "Vision / Industry Thesis" },
+  { value: "Signing Preannouncement", label: "Signing Preannouncement" },
+  { value: "Mobile gaming", label: "Mobile gaming" },
+  { value: "AI gaming", label: "AI gaming" },
+  { value: "Community engagement", label: "Community engagement" },
   { value: "Web3 gaming = Future", label: "Web3 gaming = Future" },
-  { value: "Ecosystem", label: "Ecosystem" },
-  { value: "Thought leadership", label: "Thought leadership" },
-  { value: "Partner Games", label: "Partner Games" },
-  { value: "Personal", label: "Personal" },
-  { value: "Macro Commentary", label: "Macro Commentary" },
-  { value: "Social proof", label: "Social proof" },
 ];
 
-export const weeklyContentTopicOptions: { value: ContentTopic; label: string }[] =
-  contentTopicOptions.filter(
-    (option): option is { value: ContentTopic; label: string } =>
-      option.value !== CONTENT_TOPIC_ANY
+export const weeklyArchetypeOptions: { value: Archetype; label: string }[] =
+  archetypeOptions.filter(
+    (option): option is { value: Archetype; label: string } =>
+      option.value !== ANY_ARCHETYPE
   );

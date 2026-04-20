@@ -125,7 +125,15 @@ export function getGroundingWarnings(
   args: Record<string, unknown>
 ): string[] {
   if (skillName === "hook") {
-    const hooks = Array.isArray(output.hooks) ? output.hooks.map(String) : [];
+    const hooks = Array.isArray(output.hooks)
+      ? output.hooks.map((hook) => {
+          if (typeof hook === "string") return hook;
+          if (hook && typeof hook === "object") {
+            return String((hook as { text?: unknown }).text ?? "");
+          }
+          return "";
+        })
+      : [];
     const haystack = narrativeHaystack(args);
     return haystack ? checkTweetNumbers("hook", hooks, haystack) : [];
   }

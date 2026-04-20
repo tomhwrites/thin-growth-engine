@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { contentTopicOptions, tweetStyles, CONTENT_TOPIC_ANY } from "@/utils/tweetConfig";
+import { archetypeOptions, tweetStyles, ANY_ARCHETYPE } from "@/utils/tweetConfig";
 
 type BespokeAgentKey =
   | "belief"
@@ -114,8 +114,8 @@ function createInitialAgentState(): Record<BespokeAgentKey, BespokeAgentState> {
 function BespokeAgentWorkbench() {
   const [topic, setTopic] = useState("");
   const [selectedStyleId, setSelectedStyleId] = useState("catchphrase");
-  const [selectedContentTopic, setSelectedContentTopic] =
-    useState<string>(CONTENT_TOPIC_ANY);
+  const [selectedArchetype, setSelectedArchetype] =
+    useState<string>(ANY_ARCHETYPE);
   const [agents, setAgents] = useState<Record<BespokeAgentKey, BespokeAgentState>>(
     createInitialAgentState
   );
@@ -156,7 +156,7 @@ function BespokeAgentWorkbench() {
           inputText: agents[key].input,
           topic: topic.trim() || "Web3 gaming",
           tweetStyle: selectedStyleId,
-          contentTopic: selectedContentTopic || undefined,
+          archetype: selectedArchetype || undefined,
         }),
       });
 
@@ -212,14 +212,14 @@ function BespokeAgentWorkbench() {
         <div className="grid gap-4 lg:grid-cols-2">
           <div>
             <label className="mb-2 block text-sm font-medium text-gray-300">
-              Content Archetype
+              Archetype
             </label>
             <select
-              value={selectedContentTopic}
-              onChange={(event) => setSelectedContentTopic(event.target.value)}
+              value={selectedArchetype}
+              onChange={(event) => setSelectedArchetype(event.target.value)}
               className="w-full rounded-xl border border-gray-600 bg-white/10 px-3 py-2 text-white outline-none focus:border-purple-500"
             >
-              {contentTopicOptions.map((option) => (
+              {archetypeOptions.map((option) => (
                 <option
                   key={option.value || "any"}
                   value={option.value}

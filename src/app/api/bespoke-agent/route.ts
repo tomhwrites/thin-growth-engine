@@ -14,7 +14,7 @@ import {
   type NarrativeOutput,
   type ResearchResult,
 } from "@/utils/agents";
-import { tweetStyles } from "@/utils/tweetConfig";
+import { hookTypeOptions, tweetStyles, type HookType } from "@/utils/tweetConfig";
 
 type BespokeAgentKey =
   | "belief"
@@ -30,6 +30,7 @@ interface BespokeAgentRequest {
   inputText?: string;
   topic?: string;
   tweetStyle?: string;
+  archetype?: string;
   contentTopic?: string;
 }
 
@@ -199,7 +200,30 @@ function parseDraftInput(inputText: string): {
   const hooks = hooksSection
     .split("\n")
     .map((line) => cleanLine(line))
-    .filter(Boolean);
+    .filter(Boolean)
+    .map((line) => {
+      const typedMatch = line.match(
+        /^\s*(?:\[(.+?)\]|([^:]+)):\s*(.+)\s*$/i
+      );
+
+      if (typedMatch) {
+        const typeCandidate = (typedMatch[1] || typedMatch[2] || "").trim();
+        const text = typedMatch[3].trim();
+        const matchedType = hookTypeOptions.find(
+          (option) => option.value.toLowerCase() === typeCandidate.toLowerCase()
+        )?.value;
+
+        return {
+          type: (matchedType || "Thesis statement") as HookType,
+          text,
+        };
+      }
+
+      return {
+        type: "Thesis statement" as HookType,
+        text: line,
+      };
+    });
 
   return {
     narrative,
@@ -250,7 +274,9 @@ function formatNarrative(narrative: NarrativeOutput) {
 }
 
 function formatHooks(hooks: HookOutput) {
-  return hooks.hooks.map((hook, index) => `${index + 1}. ${hook}`).join("\n");
+  return hooks.hooks
+    .map((hook, index) => `${index + 1}. [${hook.type}] ${hook.text}`)
+    .join("\n");
 }
 
 function formatTweets(tweets: string[]) {
@@ -264,7 +290,7 @@ export async function POST(request: Request) {
     const inputText = String(body.inputText ?? "").trim();
     const topic = String(body.topic ?? "").trim() || "Web3 gaming";
     const tweetStyle = body.tweetStyle || "catchphrase";
-    const contentTopic = body.contentTopic || undefined;
+    const archetype = body.archetype || body.contentTopic || undefined;
     const selectedStyle =
       tweetStyles[tweetStyle as keyof typeof tweetStyles] || tweetStyles.catchphrase;
 
@@ -339,7 +365,7 @@ export async function POST(request: Request) {
           );
         }
 
-        const exemplars = await getExemplarsForStyle(tweetStyle, contentTopic);
+        const exemplars = await getExemplarsForStyle(tweetStyle, archetype);
         const tweets = await runTweetDrafter(
           topic,
           narrative,
@@ -347,7 +373,7 @@ export async function POST(request: Request) {
           selectedStyle.name,
           selectedStyle.description,
           exemplars,
-          contentTopic,
+          archetype,
           { skipCritic: true }
         );
 
@@ -362,14 +388,14 @@ export async function POST(request: Request) {
           );
         }
 
-        const exemplars = await getExemplarsForStyle(tweetStyle, contentTopic);
+        const exemplars = await getExemplarsForStyle(tweetStyle, archetype);
         const critique = await runStandaloneTweetCriticRewrite(
           inputText,
           topic,
           selectedStyle.name,
           selectedStyle.description,
           exemplars,
-          contentTopic
+          archetype
         );
 
         const outputText = [
