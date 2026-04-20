@@ -8,3 +8,4 @@ dist/
 .next/
 tmp/
 prisma/generated/
+*.tsbuildinfo
