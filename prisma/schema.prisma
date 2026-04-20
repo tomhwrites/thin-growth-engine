@@ -1,0 +1,57 @@
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // uncomment next line if you use Prisma <5.10
+  // directUrl = env("DATABASE_URL_UNPOOLED")
+}
+
+model Trends {
+  id             Int      @id @default(autoincrement())
+  createdAt      DateTime @default(now())
+  trend_name     String
+  category       String
+  post_count     String
+  trending_since String
+}
+
+model SystemPrompts {
+  id        Int      @id @default(autoincrement())
+  createdAt DateTime @default(now())
+  name      String   @unique
+  prompt    String
+}
+
+model ExemplarTweets {
+  id            Int      @id @default(autoincrement())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  tweet_text    String
+  content_topic String
+  subtopic      String
+  tweet_style   String
+  hook_value    String
+  isThread      Boolean  @default(false)
+  archived      Boolean  @default(false)
+}
+
+model DataPoints {
+  id          Int       @id @default(autoincrement())
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  claim       String
+  category    String    // topic / market area, e.g. "asian gaming market"
+  belief      String    @default("") // belief this supported (if from research)
+  tags        String[]  @default([])
+  sourceUrl   String    @default("")
+  sourceType  String    @default("agent") // 'agent' | 'manual' | 'verified'
+  asOfDate    DateTime?
+  confidence  Int       @default(3) // 1-5
+  archived    Boolean   @default(false)
+
+  @@index([category, archived])
+}
