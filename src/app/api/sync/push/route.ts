@@ -39,9 +39,12 @@ function shouldPushExemplars(request: Request): boolean {
 export async function POST(request: Request) {
   try {
     const includeExemplars = shouldPushExemplars(request);
-    const dataPoints = await prisma.dataPoints.findMany({ orderBy: { id: "asc" } });
+    const allDataPoints = await prisma.dataPoints.findMany({ orderBy: { id: "asc" } });
+    const dataPoints = allDataPoints.filter((r) => r.sourceType !== "immutable");
+    const immutableFacts = allDataPoints.filter((r) => r.sourceType === "immutable");
 
     await pushTableToSheet("data_points", DATA_POINTS_COLUMNS, dataPoints);
+    await pushTableToSheet("immutable_facts", DATA_POINTS_COLUMNS, immutableFacts);
 
     let exemplarsPushed = 0;
     if (includeExemplars) {
@@ -54,6 +57,7 @@ export async function POST(request: Request) {
       ok: true,
       pushed: {
         data_points: dataPoints.length,
+        immutable_facts: immutableFacts.length,
         exemplar_tweets: exemplarsPushed,
       },
       skipped: includeExemplars ? [] : ["exemplar_tweets"],

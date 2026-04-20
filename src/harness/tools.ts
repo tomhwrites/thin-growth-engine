@@ -11,6 +11,8 @@ type ToolDef = {
 
 const dbStyleMapping: Record<string, string> = {
   multiparagraph: "Multiple paras",
+  bigpara: "Big para",
+  stackedlines: "Stacked lines",
   hookbullets: "Hook + list",
   causeeffect: "Cause + effect 2 liner",
   oneliner: "One liner",
@@ -23,26 +25,31 @@ const tools: Record<string, ToolDef> = {
   fetchExemplars: {
     name: "fetchExemplars",
     description:
-      "Fetch exemplar tweets to guide drafting. Returns two buckets: formExemplars (match style, for structural reference) and archetypeExemplars (match archetype, for propositional content reference).",
+      "Fetch exemplar tweets to guide drafting or hook-writing. Returns up to three buckets depending on which params are set: formExemplars (match style, for structural reference), archetypeExemplars (match archetype, for propositional content reference), and hookExemplars (match a specific hook type, for opening-line reference). Pass hookType when calling from the hook skill.",
     input_schema: {
       type: "object",
       properties: {
         style: {
           type: "string",
           description:
-            "Form/structure: oneliner | multiparagraph | hookbullets | causeeffect | parallelism | comparison",
+            "Form/structure: oneliner | multiparagraph | bigpara | stackedlines | hookbullets | causeeffect | parallelism | comparison. Optional — omit to skip formExemplars.",
         },
         topic: {
           type: "string",
           description: "Archetype to match archetype exemplars against (optional).",
         },
+        hookType: {
+          type: "string",
+          description:
+            "One of: Thesis statement | Curiosity Gap | Short | Long | Data. When set, returns hookExemplars filtered to that hook type.",
+        },
       },
-      required: ["style"],
     },
     run: async (input) => {
-      const style = String(input.style ?? "oneliner");
+      const style = input.style ? String(input.style) : undefined;
       const topic = input.topic ? String(input.topic) : undefined;
-      const dbStyle = dbStyleMapping[style] ?? dbStyleMapping.oneliner;
+      const hookType = input.hookType ? String(input.hookType) : undefined;
+      const dbStyle = style ? dbStyleMapping[style] ?? dbStyleMapping.oneliner : undefined;
 
       const format = (rows: { tweet_text: string; archetype: string; hook_value: string }[]) =>
         rows
@@ -52,11 +59,13 @@ const tools: Record<string, ToolDef> = {
           )
           .join("\n\n");
 
-      const formTweets = await prisma.exemplarTweets.findMany({
-        select: { tweet_text: true, archetype: true, hook_value: true },
-        where: { tweet_style: dbStyle, archived: false },
-        take: 5,
-      });
+      const formTweets = dbStyle
+        ? await prisma.exemplarTweets.findMany({
+            select: { tweet_text: true, archetype: true, hook_value: true },
+            where: { tweet_style: dbStyle, archived: false },
+            take: 5,
+          })
+        : [];
 
       const archetypeTweets = topic
         ? await prisma.exemplarTweets.findMany({
@@ -66,10 +75,35 @@ const tools: Record<string, ToolDef> = {
           })
         : [];
 
-      return JSON.stringify({
-        formExemplars: format(formTweets),
-        archetypeExemplars: format(archetypeTweets),
-      });
+      let hookTweets: { tweet_text: string; archetype: string; hook_value: string }[] = [];
+      if (hookType) {
+        if (topic) {
+          hookTweets = await prisma.exemplarTweets.findMany({
+            select: { tweet_text: true, archetype: true, hook_value: true },
+            where: { hook_value: hookType, archetype: topic, archived: false },
+            take: 5,
+          });
+        }
+        if (hookTweets.length < 5) {
+          const remaining = 5 - hookTweets.length;
+          const extra = await prisma.exemplarTweets.findMany({
+            select: { tweet_text: true, archetype: true, hook_value: true },
+            where: {
+              hook_value: hookType,
+              archived: false,
+              ...(topic ? { NOT: { archetype: topic } } : {}),
+            },
+            take: remaining,
+          });
+          hookTweets = [...hookTweets, ...extra];
+        }
+      }
+
+      const out: Record<string, string> = {};
+      if (dbStyle) out.formExemplars = format(formTweets);
+      if (topic) out.archetypeExemplars = format(archetypeTweets);
+      if (hookType) out.hookExemplars = format(hookTweets);
+      return JSON.stringify(out);
     },
   },
 
@@ -100,10 +134,10 @@ const tools: Record<string, ToolDef> = {
               },
               sourceUrl: {
                 type: "string",
-                description: "URL of the primary source (company blog, on-chain explorer, analyst report).",
+                description: "URL of the primary source (company blog, on-chain explorer, analyst report). REQUIRED — findings without a sourceUrl are rejected.",
               },
             },
-            required: ["belief", "claim"],
+            required: ["belief", "claim", "sourceUrl"],
           },
         },
       },
@@ -112,26 +146,35 @@ const tools: Record<string, ToolDef> = {
     run: async (input) => {
       const topic = String(input.topic ?? "").toLowerCase().trim();
       const findings = Array.isArray(input.findings) ? input.findings : [];
-      if (!topic || findings.length === 0) return JSON.stringify({ inserted: 0 });
+      if (!topic || findings.length === 0) return JSON.stringify({ inserted: 0, rejected: 0 });
+      let rejected = 0;
       const rows = findings
-        .filter((f: any) => typeof f?.claim === "string" && f.claim.trim())
-        .map((f: any) => ({
-          claim: String(f.claim).trim(),
-          category: topic,
-          belief: String(f.belief ?? ""),
-          sourceUrl: String(f.sourceUrl ?? ""),
-          sourceType: "agent",
-        }));
-      if (rows.length === 0) return JSON.stringify({ inserted: 0 });
+        .map((f: any) => {
+          const claim = typeof f?.claim === "string" ? f.claim.trim() : "";
+          const sourceUrl = typeof f?.sourceUrl === "string" ? f.sourceUrl.trim() : "";
+          if (!claim || !sourceUrl || !/^https?:\/\//i.test(sourceUrl)) {
+            rejected++;
+            return null;
+          }
+          return {
+            claim,
+            category: topic,
+            belief: String(f.belief ?? ""),
+            sourceUrl,
+            sourceType: "agent",
+          };
+        })
+        .filter((r): r is NonNullable<typeof r> => r !== null);
+      if (rows.length === 0) return JSON.stringify({ inserted: 0, rejected });
       const result = await prisma.dataPoints.createMany({ data: rows });
-      return JSON.stringify({ inserted: result.count });
+      return JSON.stringify({ inserted: result.count, rejected });
     },
   },
 
   queryDataPoints: {
     name: "queryDataPoints",
     description:
-      "Search the DataPoints table for facts relevant to a topic. Returns a ranked list (verified > manual > agent, most recent first). Use these as grounding for tweets — prefer VERIFIED/MANUAL over agent.",
+      "Search the DataPoints table for facts relevant to a topic. Returns a ranked list (immutable > verified > manual > agent, most recent first). IMMUTABLE rows are curated Immutable-specific facts and should be preferred for any Immutable-related claim.",
     input_schema: {
       type: "object",
       properties: {
@@ -165,7 +208,7 @@ const tools: Record<string, ToolDef> = {
         orderBy: { updatedAt: "desc" },
       });
 
-      const rank: Record<string, number> = { verified: 0, manual: 1, agent: 2 };
+      const rank: Record<string, number> = { immutable: 0, verified: 1, manual: 2, agent: 3 };
       rows.sort((a, b) => {
         const ra = rank[a.sourceType] ?? 3;
         const rb = rank[b.sourceType] ?? 3;

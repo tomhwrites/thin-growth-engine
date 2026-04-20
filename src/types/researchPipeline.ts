@@ -10,6 +10,8 @@ export interface EvidencePoint {
   metric: string;
   sourceType: string;
   bullishSignal: string;
+  rank?: number;
+  whyCompelling?: string;
 }
 
 export interface EvidenceNeed {

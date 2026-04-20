@@ -81,6 +81,78 @@ async function pullDataPoints(): Promise<{
   return { created, updated, skipped };
 }
 
+async function pullImmutableFacts(): Promise<{
+  created: number;
+  updated: number;
+  skipped: number;
+  ids_backfilled: number;
+}> {
+  const { header, rows } = await pullSheetRecords("immutable_facts");
+  let created = 0;
+  let updated = 0;
+  let skipped = 0;
+  let idsBackfilled = 0;
+
+  if (rows.length === 0 || !header.includes("claim")) {
+    return { created, updated, skipped, ids_backfilled: idsBackfilled };
+  }
+
+  const pendingIdWrites: { rowNumber: number; value: string }[] = [];
+
+  for (const row of rows) {
+    const r = row.values;
+    const id = parseIntOrNull(r.id);
+    const claim = (r.claim ?? "").trim();
+    const category = (r.category ?? "").trim();
+
+    if (!claim || !category) {
+      skipped++;
+      continue;
+    }
+
+    const data = {
+      claim,
+      category,
+      belief: r.belief ?? "",
+      tags: parseList(r.tags),
+      sourceUrl: r.sourceUrl ?? "",
+      sourceType: "immutable",
+      asOfDate: parseDateOrNull(r.asOfDate),
+      confidence: parseIntOrNull(r.confidence) ?? 5,
+      archived: parseBool(r.archived),
+    };
+
+    try {
+      if (id) {
+        const existing = await prisma.dataPoints.findUnique({ where: { id } });
+        if (!existing) {
+          skipped++;
+          continue;
+        }
+        await prisma.dataPoints.update({ where: { id }, data });
+        updated++;
+        continue;
+      }
+
+      const createdRow = await prisma.dataPoints.create({ data });
+      created++;
+      pendingIdWrites.push({
+        rowNumber: row.rowNumber,
+        value: String(createdRow.id),
+      });
+    } catch {
+      skipped++;
+    }
+  }
+
+  if (pendingIdWrites.length > 0) {
+    await writeSheetColumnValues("immutable_facts", header, "id", pendingIdWrites);
+    idsBackfilled = pendingIdWrites.length;
+  }
+
+  return { created, updated, skipped, ids_backfilled: idsBackfilled };
+}
+
 async function pullExemplarTweets(): Promise<{
   created: number;
   updated: number;
@@ -199,10 +271,15 @@ async function pullExemplarTweets(): Promise<{
 
 export async function POST() {
   try {
-    const [dp, ex] = await Promise.all([pullDataPoints(), pullExemplarTweets()]);
+    const [dp, immu, ex] = await Promise.all([
+      pullDataPoints(),
+      pullImmutableFacts(),
+      pullExemplarTweets(),
+    ]);
     return NextResponse.json({
       ok: true,
       data_points: dp,
+      immutable_facts: immu,
       exemplar_tweets: ex,
     });
   } catch (e: any) {

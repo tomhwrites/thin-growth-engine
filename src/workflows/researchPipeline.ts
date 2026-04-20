@@ -162,9 +162,10 @@ export async function runResearchPipelineStage(
       if (!input.narrative) {
         throw new Error("Narrative required for hook stage");
       }
+      const archetype = input.archetype ?? input.contentTopic;
       const result = await executeSkill<HookSkillOutput>(
         "hook",
-        withAliases({ topic, narrative: input.narrative }),
+        withAliases({ topic, narrative: input.narrative, archetype, contentTopic: archetype }),
         opts
       );
       return { hooks: result.output, warnings: result.warnings };
@@ -216,7 +217,7 @@ export async function runResearchPipelineChain(
   );
   const hook = await executeSkill<HookSkillOutput>(
     "hook",
-    withAliases({ topic, narrative: narrative.output }),
+    withAliases({ topic, narrative: narrative.output, archetype, contentTopic: archetype }),
     opts
   );
   const draft = await runDraftStage(
