@@ -11,6 +11,7 @@ export type GenerateTweetsRequest = {
   overarchingNarrative: string;
   selectedMetrics: string[];
   tweetStyle: string;
+  dataSource?: "internal" | "quick" | "deep";
   archetype?: string;
   contentTopic?: string;
   model?: string;
@@ -40,6 +41,7 @@ export async function generateTweetsFromOpenAI(
     customPrompt,
     overarchingNarrative,
     selectedMetrics,
+    dataSource,
     archetype = params.contentTopic,
   } = params;
 
@@ -69,32 +71,34 @@ export async function generateTweetsFromOpenAI(
     const exemplarTweetsText = await getExemplarsForStyle(tweetStyle, archetype);
 
     // STEP 1: Gather relevant information via web search
-    console.log("Step 1: Gathering relevant information via web search...");
+    let researchInfo = "";
+    if (dataSource !== "internal") {
+      console.log("Step 1: Gathering relevant information via web search...");
 
-    const searchPrompt = `I need to create tweets about ${
-      customPrompt || topic
-    }. 
-    Please search the web for the most relevant and recent information about this topic, 
-    focusing specifically on:
-    
-    1. Key metrics and statistics (e.g., user counts, growth percentages, market size, investments)
-    2. Recent developments or announcements
-    3. Industry trends and projections
-    4. Comparative data points
-    5. Notable achievements or milestones
-    
-    Organize the information in a structured format with clear sections for different aspects of the topic. 
-    Include specific numbers, dates, and factual information that would be useful for creating impactful tweets.`;
+      const searchPrompt = `I need to create tweets about ${
+        customPrompt || topic
+      }. 
+      Please search the web for the most relevant and recent information about this topic, 
+      focusing specifically on:
+      
+      1. Key metrics and statistics (e.g., user counts, growth percentages, market size, investments)
+      2. Recent developments or announcements
+      3. Industry trends and projections
+      4. Comparative data points
+      5. Notable achievements or milestones
+      
+      Organize the information in a structured format with clear sections for different aspects of the topic. 
+      Include specific numbers, dates, and factual information that would be useful for creating impactful tweets.`;
 
-    const searchResponse = await openai.responses.create({
-      model: "gpt-4o",
-      tools: [{ type: "web_search_preview", search_context_size: "medium" }],
-      input: searchPrompt,
-    });
+      const searchResponse = await openai.responses.create({
+        model: "gpt-4o",
+        tools: [{ type: "web_search_preview", search_context_size: "medium" }],
+        input: searchPrompt,
+      });
 
-    // Extract the research information
-    const researchInfo = searchResponse.output_text || "";
-    console.log("Research information gathered successfully");
+      researchInfo = searchResponse.output_text || "";
+      console.log("Research information gathered successfully");
+    }
 
     console.log("Step 2: Generating tweets using shared drafter prompt...");
 

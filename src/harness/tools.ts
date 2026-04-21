@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { getExemplarsForStyle, getHookExemplars } from "@/lib/exemplars";
+import { getRelevantDataPoints } from "@/lib/dataPoints";
 
 export type ToolInput = Record<string, unknown>;
 
@@ -135,31 +136,12 @@ const tools: Record<string, ToolDef> = {
       const topic = String(input.topic ?? "").toLowerCase().trim();
       const limit = typeof input.limit === "number" ? input.limit : 10;
       if (!topic) return JSON.stringify({ rows: [] });
-
-      const words = topic.split(/\s+/).filter((w) => w.length > 3);
-      const rows = await prisma.dataPoints.findMany({
-        where: {
-          archived: false,
-          OR: [
-            { category: { contains: topic, mode: "insensitive" } },
-            ...words.map((w) => ({ category: { contains: w, mode: "insensitive" as const } })),
-            ...words.map((w) => ({ claim: { contains: w, mode: "insensitive" as const } })),
-          ],
-        },
-        take: limit * 2,
-        orderBy: { updatedAt: "desc" },
-      });
-
-      const rank: Record<string, number> = { immutable: 0, verified: 1, manual: 2, agent: 3 };
-      rows.sort((a, b) => {
-        const ra = rank[a.sourceType] ?? 3;
-        const rb = rank[b.sourceType] ?? 3;
-        if (ra !== rb) return ra - rb;
-        return b.updatedAt.getTime() - a.updatedAt.getTime();
+      const rows = await getRelevantDataPoints(topic, limit, {
+        includeImmutableFallback: true,
       });
 
       return JSON.stringify({
-        rows: rows.slice(0, limit).map((r) => ({
+        rows: rows.map((r) => ({
           claim: r.claim,
           category: r.category,
           sourceType: r.sourceType.toUpperCase(),

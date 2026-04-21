@@ -45,12 +45,17 @@ export async function POST(request: Request) {
       tweetStyles[requestData.tweetStyle as keyof typeof tweetStyles] ||
       tweetStyles.catchphrase;
 
+    const skillName =
+      requestData.dataSource === "internal"
+        ? "direct-draft-internal"
+        : "direct-draft";
+
     const result = await executeSkill<{
       tweets: string[];
       factsUsed?: string[];
       rationale?: string;
     }>(
-      "direct-draft",
+      skillName,
       withAliases({
         topic: requestData.topic,
         narrative: requestData.overarchingNarrative || requestData.topic,
@@ -60,6 +65,7 @@ export async function POST(request: Request) {
         styleDescription: selectedStyle.description,
         archetype: requestData.archetype ?? requestData.contentTopic,
         contentTopic: requestData.archetype ?? requestData.contentTopic,
+        dataSource: requestData.dataSource,
       })
     );
 

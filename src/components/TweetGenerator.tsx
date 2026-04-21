@@ -237,6 +237,7 @@ const TweetGenerator = (props: TweetGeneratorProps) => {
           overarchingNarrative: internalData.overarchingNarrative || "",
           selectedMetrics: internalData.metrics.map((m: Metric) => m.name),
           tweetStyle: selectedStyleId,
+          dataSource,
           archetype: selectedArchetype || undefined,
         } as GenerateTweetsRequest),
       });
@@ -289,6 +290,7 @@ const TweetGenerator = (props: TweetGeneratorProps) => {
           overarchingNarrative: metricsData.overarchingNarrative || "",
           selectedMetrics: metricsData.metrics.map((m: Metric) => m.name),
           tweetStyle: selectedStyleId,
+          dataSource,
           archetype: selectedArchetype || undefined,
         } as GenerateTweetsRequest),
       });

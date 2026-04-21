@@ -25,6 +25,16 @@ You will be given TOPIC, NARRATIVE, METRICS, STYLE_NAME, STYLE_DESCRIPTION, opti
 
 Draft exactly 6 distinct tweets.
 
+# Grounding contract
+
+Every number, %, date, $ amount, proper noun fact, ranking, and time-relative claim in any tweet must appear verbatim in:
+
+1. `METRICS`
+2. `NARRATIVE`
+3. `LIVE_RESEARCH`
+
+Do not derive ages, durations, or "since launch" math from dates. If a relative age is not supplied verbatim, do not write it.
+
 # Drafting rules
 
 - Match STYLE_NAME / STYLE_DESCRIPTION exactly.
@@ -32,6 +42,7 @@ Draft exactly 6 distinct tweets.
 - Ground tweets in METRICS and LIVE_RESEARCH.
 - Keep each tweet net bullish, specific, and falsifiable.
 - Reject vague, non-falsifiable payoff lines.
+- Do not infer how old a product is from the current date.
 - For `hookbullets`, prefer:
   - one hook line
   - exactly 3 concise `•` bullets

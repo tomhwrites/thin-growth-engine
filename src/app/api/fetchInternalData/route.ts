@@ -14,7 +14,9 @@ export async function POST(request: Request) {
     const { topic } = (await request.json()) as FetchInternalDataRequest;
     const topicToUse = topic || "Web3 gaming";
 
-    const dataPoints = await getRelevantDataPoints(topicToUse, 20);
+    const dataPoints = await getRelevantDataPoints(topicToUse, 20, {
+      includeImmutableFallback: true,
+    });
 
     if (dataPoints.length === 0) {
       return NextResponse.json({

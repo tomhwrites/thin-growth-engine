@@ -289,7 +289,9 @@ async function runWeeklyInternalDraft(
   const matchingNarrative = findMatchingNarrative(synthesis, slot);
   const effectiveTopic = getWeeklySlotEffectiveTopic(slot);
   const searchTopic = [effectiveTopic, slot.additionalContext].filter(Boolean).join(". ");
-  const dataPoints = await getRelevantDataPoints(searchTopic, 20);
+  const dataPoints = await getRelevantDataPoints(searchTopic, 20, {
+    includeImmutableFallback: true,
+  });
 
   const grouped: Record<string, ResearchResult["findings"]> = {};
   for (const dataPoint of dataPoints) {
