@@ -255,6 +255,15 @@ function WeeklyPlanner() {
     );
   };
 
+  const handleSetAllDraftModes = (draftMode: WeeklyPlanSlot["draftMode"]) => {
+    setSlots((currentSlots) =>
+      currentSlots.map((slot) => ({
+        ...slot,
+        draftMode,
+      }))
+    );
+  };
+
   const handleResetPlanner = () => {
     setSlots(buildDefaultWeeklyPlanSlots());
     setSynthesis(null);
@@ -442,6 +451,30 @@ function WeeklyPlanner() {
           >
             Reset Planner
           </button>
+        </div>
+
+        <div className="rounded-xl border border-gray-700 bg-black/10 p-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="text-sm font-medium text-white">Bulk Draft Method</div>
+              <p className="text-sm text-gray-400">
+                Apply the same draft method to all 15 weekly slots at once.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {WEEKLY_DRAFT_MODE_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  onClick={() => handleSetAllDraftModes(option.value)}
+                  disabled={plannerStage !== null}
+                  className="rounded-lg border border-gray-600 px-4 py-2 text-sm text-gray-300 transition-colors hover:border-gray-400 hover:text-white disabled:opacity-50"
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         {plannerError && (
