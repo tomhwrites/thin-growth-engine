@@ -8,10 +8,28 @@ import { useRouter } from "next/navigation";
 
 type SyncState = "idle" | "pulling" | "pushing" | "done" | "error";
 
+async function readApiPayload(res: Response) {
+  const contentType = res.headers.get("content-type") ?? "";
+
+  if (contentType.includes("application/json")) {
+    return await res.json();
+  }
+
+  const text = await res.text();
+  const isHtml = /^\s*</.test(text);
+  if (res.redirected || isHtml) {
+    throw new Error("Your session may have expired. Refresh the page or sign in again.");
+  }
+
+  throw new Error("The server returned an unexpected response.");
+}
+
 export default function NavBar() {
   const router = useRouter();
-  const [syncState, setSyncState] = useState<SyncState>("idle");
-  const [syncMessage, setSyncMessage] = useState<string>("");
+  const [reconcileState, setReconcileState] = useState<SyncState>("idle");
+  const [reconcileMessage, setReconcileMessage] = useState<string>("");
+  const [pushState, setPushState] = useState<SyncState>("idle");
+  const [pushMessage, setPushMessage] = useState<string>("");
 
   async function signOut() {
     const supabase = createClient();
@@ -19,32 +37,58 @@ export default function NavBar() {
     router.push("/login");
   }
 
-  async function syncDataPoints() {
-    setSyncState("pulling");
-    setSyncMessage("Pulling sheet → DB…");
+  async function reconcileSheets() {
+    setReconcileState("pulling");
+    setReconcileMessage("Pulling sheet → DB…");
     try {
       const res = await fetch("/api/sync/reconcile", { method: "POST" });
-      const data = await res.json();
+      const data = await readApiPayload(res);
       if (!res.ok) {
-        setSyncState("error");
-        setSyncMessage(data.error || "Sync failed");
+        setReconcileState("error");
+        setReconcileMessage(data.error || "Sync failed");
         return;
       }
       const dp = data.pull?.data_points ?? {};
       const immu = data.pull?.immutable_facts ?? {};
       const pushed = data.push?.pushed ?? {};
-      setSyncState("done");
-      setSyncMessage(
+      setReconcileState("done");
+      setReconcileMessage(
         `Pulled: data_points ${dp.created ?? 0}+/${dp.updated ?? 0}~ · immutable_facts ${immu.created ?? 0}+/${immu.updated ?? 0}~. Pushed ${pushed.data_points ?? 0} + ${pushed.immutable_facts ?? 0}.`
       );
-      setTimeout(() => setSyncState("idle"), 5000);
+      setTimeout(() => setReconcileState("idle"), 5000);
     } catch (err: any) {
-      setSyncState("error");
-      setSyncMessage(err?.message || "Sync failed");
+      setReconcileState("error");
+      setReconcileMessage(err?.message || "Sync failed");
     }
   }
 
-  const isSyncing = syncState === "pulling" || syncState === "pushing";
+  async function pushResearchToSheet() {
+    setPushState("pushing");
+    setPushMessage("Pushing DB → sheet…");
+    try {
+      const res = await fetch("/api/sync/push", { method: "POST" });
+      const data = await readApiPayload(res);
+      if (!res.ok) {
+        setPushState("error");
+        setPushMessage(data.error || "Push failed");
+        return;
+      }
+
+      const pushed = data.pushed ?? {};
+      setPushState("done");
+      setPushMessage(
+        `Pushed ${pushed.data_points ?? 0} data points and ${pushed.immutable_facts ?? 0} immutable facts to Google Sheets.`
+      );
+      setTimeout(() => setPushState("idle"), 5000);
+    } catch (err: any) {
+      setPushState("error");
+      setPushMessage(err?.message || "Push failed");
+    }
+  }
+
+  const isReconciling =
+    reconcileState === "pulling" || reconcileState === "pushing";
+  const isPushing = pushState === "pulling" || pushState === "pushing";
 
   return (
     <nav className="sticky top-0 z-50 border-b border-white/10 bg-black shadow-md">
@@ -67,26 +111,47 @@ export default function NavBar() {
           </div>
         </div>
         <div className="flex items-center gap-4">
-          {syncState !== "idle" && (
+          {reconcileState !== "idle" && (
             <span
               className={`text-xs ${
-                syncState === "error"
+                reconcileState === "error"
                   ? "text-red-400"
-                  : syncState === "done"
+                  : reconcileState === "done"
                     ? "text-green-400"
                     : "text-gray-400"
               } max-w-xs truncate`}
-              title={syncMessage}
+              title={reconcileMessage}
             >
-              {syncMessage}
+              {reconcileMessage}
+            </span>
+          )}
+          {pushState !== "idle" && (
+            <span
+              className={`text-xs ${
+                pushState === "error"
+                  ? "text-red-400"
+                  : pushState === "done"
+                    ? "text-green-400"
+                    : "text-gray-400"
+              } max-w-xs truncate`}
+              title={pushMessage}
+            >
+              {pushMessage}
             </span>
           )}
           <button
-            onClick={syncDataPoints}
-            disabled={isSyncing}
+            onClick={pushResearchToSheet}
+            disabled={isReconciling || isPushing}
             className="text-sm text-gray-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isSyncing ? "Syncing…" : "Sync data points"}
+            {isPushing ? "Pushing…" : "Push research to sheet"}
+          </button>
+          <button
+            onClick={reconcileSheets}
+            disabled={isReconciling || isPushing}
+            className="text-sm text-gray-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isReconciling ? "Reconciling…" : "Reconcile sheet edits"}
           </button>
           <button
             onClick={signOut}

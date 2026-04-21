@@ -5,34 +5,12 @@
 // Exemplars are NOT included — those stay pull-only (sheet is source of truth).
 
 import { NextResponse } from "next/server";
-
-async function internalPost(path: string, origin: string): Promise<Response> {
-  return fetch(`${origin}${path}`, { method: "POST" });
-}
+import { runReconcileSheets, shouldPushExemplars } from "@/lib/sheetSync";
 
 export async function POST(request: Request) {
   try {
-    const origin = new URL(request.url).origin;
-
-    const pullRes = await internalPost("/api/sync/pull", origin);
-    const pull = await pullRes.json();
-    if (!pullRes.ok) {
-      return NextResponse.json(
-        { error: "pull failed", detail: pull },
-        { status: 500 }
-      );
-    }
-
-    const pushRes = await internalPost("/api/sync/push", origin);
-    const push = await pushRes.json();
-    if (!pushRes.ok) {
-      return NextResponse.json(
-        { error: "push failed", detail: push, pull },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ ok: true, pull, push });
+    const includeExemplars = shouldPushExemplars(request);
+    return NextResponse.json(await runReconcileSheets(includeExemplars));
   } catch (e: any) {
     console.error("[sync/reconcile]", e);
     return NextResponse.json(
