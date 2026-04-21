@@ -80,7 +80,8 @@ export const tweetStyles: Record<string, TweetStyle> = {
     name: "Hook and Bullet Points Tweet",
     example:
       "2021 was the craziest year of our lives.\n\n- Axie holders grew by %10,363\n- AXS staking launch\n- Ronin mainnet launch\n- Katana launch (1.2 B liquidity & 20,000+ Daily traders)\n- Axie community treasury: 2 B + in value (52,000 ETH + 21 M AXS)\n\n2022 we'll shock the world (again).",
-    description: `An opening hook followed a new line and then 3-4 concise bullet points using the bullet point character '•'. No rhetorical questions. Prioritise data driven metrics. The hook should communicate value by either highlighting a key metric or invoking curiosity in the reader. Try to be attention grabbing in the hook by incoporating either a bold metric/claim, something very recent (e.g. just, now, soon, today, tomorrow, this week), and be high in modality. Try have the hook provide more value upfront by using a specific data point. Do NOT use hyphen dashes.`,
+    description:
+      "An opening hook followed by exactly 3 concise bullet points using the bullet point character '•'. Prioritise concrete metrics and proof points. The closer is optional and should be omitted if it would be vague, hypey, or non-falsifiable. Do NOT use hyphen dashes.",
   },
   multiparagraph: {
     name: "Multiparagraph Tweet",

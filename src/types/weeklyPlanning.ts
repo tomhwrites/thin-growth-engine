@@ -9,7 +9,7 @@ export type AudienceLens =
   | "market_observer";
 
 export type SlotStatus = "planned" | "drafted" | "approved" | "scheduled";
-export type WeeklyDraftMode = "research" | "internal";
+export type WeeklyDraftMode = "research" | "quick" | "internal";
 export type WeeklyPlanningMode = "default_slots" | "new_context";
 
 export interface WeeklyInput {
@@ -74,8 +74,9 @@ export const WEEKLY_DRAFT_MODE_OPTIONS: {
   value: WeeklyDraftMode;
   label: string;
 }[] = [
-  { value: "research", label: "6-stage research agent" },
-  { value: "internal", label: "Internal data" },
+  { value: "internal", label: "Internal only (DB, no web)" },
+  { value: "quick", label: "Quick research (3 web searches)" },
+  { value: "research", label: "Deep research (6-stage pipeline)" },
 ];
 
 export const WEEKLY_SLOT_COUNT = 15;
@@ -246,7 +247,7 @@ export function buildDefaultBauWeeklyPlanSlots() {
       archetype: blueprint.archetype,
       goal: defaults.goal,
       tweetStyle: defaults.tweetStyle,
-      draftMode: "internal" as const,
+      draftMode: "quick" as const,
     };
   });
 }

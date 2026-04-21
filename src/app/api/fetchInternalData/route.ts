@@ -1,8 +1,9 @@
 // app/api/fetchInternalData/route.ts
 import { NextResponse } from "next/server";
 import { Metric } from "@/components/TweetGenerator";
+import { executeSkill } from "@/harness/execute";
 import { getRelevantDataPoints } from "@/lib/dataPoints";
-import { callClaude } from "@/utils/agents";
+import { withAliases } from "@/lib/skillArgs";
 
 interface FetchInternalDataRequest {
   topic: string;
@@ -30,13 +31,14 @@ export async function POST(request: Request) {
     }));
 
     // Synthesize a short narrative from DB claims only — no web search.
-    const claimsBlock = dataPoints.map((dp) => `- ${dp.claim}`).join("\n");
-    const overarchingNarrative = await callClaude(
-      "You are a concise editorial assistant.",
-      `Based only on the data points below, write a 1–2 sentence bullish narrative about "${topicToUse}" relevant to Immutable's position. Write ONLY the narrative — no preamble, no labels.\n\n${claimsBlock}`,
-      200,
-      { includeBusinessContext: false }
+    const narrativeResult = await executeSkill<{ overarchingNarrative: string }>(
+      "internal-narrative",
+      withAliases({
+        topic: topicToUse,
+        claims: dataPoints.map((dataPoint) => dataPoint.claim),
+      })
     );
+    const overarchingNarrative = narrativeResult.output.overarchingNarrative;
 
     return NextResponse.json({ metrics, overarchingNarrative, count: dataPoints.length });
   } catch (error: any) {

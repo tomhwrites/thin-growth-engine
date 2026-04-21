@@ -36,6 +36,7 @@ Call `fetchExemplars({ style: STYLE, topic: ARCHETYPE })` and use both buckets:
 Score every draft against:
 - **Hook** — does the opening line earn the scroll-stop? (diagnostic only — you will not rewrite the hook)
 - **Data** — specific, concrete, verifiable fact grounded in NARRATIVE.supportingData or NARRATIVE.insight? (penalise vague framing and unsupported numbers)
+- **Falsifiability** — penalise hypey payoff lines, sweeping inevitability language, and concrete-sounding claims that are not actually supported by the draft's evidence
 - **Brand fit** — sounds like an informed operator, not marketing. Leaves reader more bullish on Immutable. Matches the `archetypeExemplars` propositional content.
 - **Style** — matches STYLE and the `formExemplars`.
 
@@ -48,6 +49,7 @@ For each rewrite:
 - Rewrite only the body that follows the hook.
 - Ground every fact in NARRATIVE.supportingData / NARRATIVE.insight. Reuse the existing fact unless it was clearly ungrounded or vague.
 - Match STYLE + `formExemplars`. For `bigpara`, preserve one developed paragraph rather than breaking into bullets. For `stackedlines`, preserve short line-by-line cadence.
+- For `hookbullets`, prefer `hook + 3 concise bullets`; remove the closer if it is merely hype and does not add a concrete implication.
 - Obey every tweet-voice rule (no banned constructions, no forbidden terms, no em dashes / hyphens / emojis / hashtags).
 - If the original body raised a caveat, resolve it into a stronger positive takeaway.
 - Whole rewrite ≤ 280 chars including the preserved hook.

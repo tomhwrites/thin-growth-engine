@@ -1,11 +1,8 @@
 import OpenAI from "openai";
-import {
-  buildSharedTweetDrafterUserPrompt,
-  getExemplarsForStyle,
-  IMMUTABLE_CONTEXT,
-  parseDraftedTweets,
-  SHARED_TWEET_DRAFTER_SYSTEM_PROMPT,
-} from "@/utils/agents";
+import { buildSkillSystemPrompt } from "@/harness/skillLoader";
+import { buildDirectDraftUserPrompt } from "@/lib/directDraftPrompt";
+import { getExemplarsForStyle } from "@/lib/exemplars";
+import { parseDelimitedTweets } from "@/lib/tweetOutput";
 import { tweetStyles } from "@/utils/tweetConfig";
 
 // Define the types for the tweet generation request
@@ -54,8 +51,17 @@ export async function generateTweetsFromOpenAI(
     tweetStyles.catchphrase;
 
   // Initialize OpenAI API client
+  const openAIApiKey =
+    process.env.OPEN_AI_API_SECRET || process.env.OPENAI_API_KEY || "";
+
+  if (!openAIApiKey) {
+    throw new Error(
+      "Missing OpenAI API key. Set OPEN_AI_API_SECRET or OPENAI_API_KEY."
+    );
+  }
+
   const openai = new OpenAI({
-    apiKey: process.env.OPEN_AI_API_SECRET!,
+    apiKey: openAIApiKey,
   });
 
   try {
@@ -92,29 +98,27 @@ export async function generateTweetsFromOpenAI(
 
     console.log("Step 2: Generating tweets using shared drafter prompt...");
 
-    const tweetGenerationPrompt = buildSharedTweetDrafterUserPrompt(
-      customPrompt || topic,
-      {
-        insight: overarchingNarrative || customPrompt || topic,
-        angle: "",
-        supportingData: selectedMetrics,
-      },
-      { hooks: [] },
-      selectedStyle.name,
-      selectedStyle.description,
-      exemplarTweetsText,
+    const tweetGenerationPrompt = buildDirectDraftUserPrompt({
+      topic: customPrompt || topic,
+      narrative: overarchingNarrative || customPrompt || topic,
+      metrics: selectedMetrics,
+      styleName: selectedStyle.name,
+      styleDescription: selectedStyle.description,
       archetype,
-      [`Live research information:\n${researchInfo}`]
-    );
+      exemplars: exemplarTweetsText,
+      liveResearch: researchInfo,
+    });
+
+    const systemPrompt = await buildSkillSystemPrompt("direct-draft-openai");
 
     const tweetResponse = await openai.responses.create({
       model: "gpt-4.1",
-      instructions: `${IMMUTABLE_CONTEXT}\n\n${SHARED_TWEET_DRAFTER_SYSTEM_PROMPT}`,
+      instructions: systemPrompt,
       input: tweetGenerationPrompt,
     });
 
     const generatedText = tweetResponse.output_text || "";
-    const tweets = parseDraftedTweets(generatedText);
+    const tweets = parseDelimitedTweets(generatedText).slice(0, 6);
 
     return {
       tweets,

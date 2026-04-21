@@ -137,6 +137,10 @@ The user wanted the work to stay aligned with **Thin Harness, Fat Skills**. The 
 
 User said "I'll deal with this later" for the em-dash / banned-construction programmatic check — currently the critic catches some voice violations but not all. Don't spend time on that unless asked.
 
+Deferred TODO owned by the user:
+- Ending-style sheet/schema work is intentionally deferred and user-owned.
+- If that work is resumed later, keep the data tags user-managed in Google Sheets / Supabase and wire any prompting behavior through `skills/`, not `src/utils/agents.ts`.
+
 ## 4. Running it
 
 ```bash

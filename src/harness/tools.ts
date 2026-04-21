@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { getExemplarsForStyle, getHookExemplars } from "@/lib/exemplars";
 
 export type ToolInput = Record<string, unknown>;
 
@@ -7,18 +8,6 @@ type ToolDef = {
   description: string;
   input_schema: Record<string, unknown>;
   run: (input: ToolInput) => Promise<string>;
-};
-
-const dbStyleMapping: Record<string, string> = {
-  multiparagraph: "Multiple paras",
-  bigpara: "Big para",
-  stackedlines: "Stacked lines",
-  hookbullets: "Hook + list",
-  causeeffect: "Cause + effect 2 liner",
-  oneliner: "One liner",
-  parallelism: "Parallelism",
-  comparison: "Comparison",
-  catchphrase: "One liner",
 };
 
 const tools: Record<string, ToolDef> = {
@@ -49,60 +38,13 @@ const tools: Record<string, ToolDef> = {
       const style = input.style ? String(input.style) : undefined;
       const topic = input.topic ? String(input.topic) : undefined;
       const hookType = input.hookType ? String(input.hookType) : undefined;
-      const dbStyle = style ? dbStyleMapping[style] ?? dbStyleMapping.oneliner : undefined;
-
-      const format = (rows: { tweet_text: string; archetype: string; hook_value: string }[]) =>
-        rows
-          .map(
-            (t, i) =>
-              `Example ${i + 1} (Archetype: ${t.archetype}; Hook type: ${t.hook_value || "Unspecified"}):\n"${t.tweet_text}"`
-          )
-          .join("\n\n");
-
-      const formTweets = dbStyle
-        ? await prisma.exemplarTweets.findMany({
-            select: { tweet_text: true, archetype: true, hook_value: true },
-            where: { tweet_style: dbStyle, archived: false },
-            take: 5,
-          })
-        : [];
-
-      const archetypeTweets = topic
-        ? await prisma.exemplarTweets.findMany({
-            select: { tweet_text: true, archetype: true, hook_value: true },
-            where: { archetype: topic, archived: false },
-            take: 5,
-          })
-        : [];
-
-      let hookTweets: { tweet_text: string; archetype: string; hook_value: string }[] = [];
-      if (hookType) {
-        if (topic) {
-          hookTweets = await prisma.exemplarTweets.findMany({
-            select: { tweet_text: true, archetype: true, hook_value: true },
-            where: { hook_value: hookType, archetype: topic, archived: false },
-            take: 5,
-          });
-        }
-        if (hookTweets.length < 5) {
-          const remaining = 5 - hookTweets.length;
-          const extra = await prisma.exemplarTweets.findMany({
-            select: { tweet_text: true, archetype: true, hook_value: true },
-            where: {
-              hook_value: hookType,
-              archived: false,
-              ...(topic ? { NOT: { archetype: topic } } : {}),
-            },
-            take: remaining,
-          });
-          hookTweets = [...hookTweets, ...extra];
-        }
-      }
-
       const out: Record<string, string> = {};
-      if (dbStyle) out.formExemplars = format(formTweets);
-      if (topic) out.archetypeExemplars = format(archetypeTweets);
-      if (hookType) out.hookExemplars = format(hookTweets);
+      if (style) {
+        const exemplars = await getExemplarsForStyle(style, topic);
+        out.formExemplars = exemplars.formExemplars;
+        if (topic) out.archetypeExemplars = exemplars.archetypeExemplars;
+      }
+      if (hookType) out.hookExemplars = await getHookExemplars(hookType, topic);
       return JSON.stringify(out);
     },
   },

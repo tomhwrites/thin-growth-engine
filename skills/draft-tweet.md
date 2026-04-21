@@ -53,6 +53,7 @@ For each of the 6 HOOKS (in order, indices 0–5):
 Style intent:
 - `bigpara` = one larger paragraph that develops the point without bullets or paragraph stacking
 - `stackedlines` = short stacked lines where each line adds momentum before the payoff
+- `hookbullets` = one hook line plus exactly 3 concise `•` bullets; the closer is optional and should be omitted if it would be vague or hypey
 
 The 6 drafts will naturally differ because their hooks differ — do not converge their bodies to the same phrasing.
 
@@ -60,6 +61,7 @@ The 6 drafts will naturally differ because their hooks differ — do not converg
 For each draft:
 1. Confirm the first line is the verbatim HOOKS[i].text (including casing, punctuation).
 2. For each number / % / $ / date / proper noun in the draft, find it verbatim in NARRATIVE.insight, a NARRATIVE.supportingData claim, or a queryDataPoints result. If missing, drop or swap the fact.
+3. If STYLE is `hookbullets`, prefer `hook + 3 bullets` over forcing a closing line. If you add a closer, it must be concrete, falsifiable, and earned by the bullets above it.
 
 ## Step 6 — Output
 

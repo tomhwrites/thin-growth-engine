@@ -1,4 +1,5 @@
 import { executeSkill } from "@/harness/execute";
+import { withAliases } from "@/lib/skillArgs";
 import type {
   Belief,
   EvidenceNeed,
@@ -6,6 +7,7 @@ import type {
   NarrativeOutput,
   ResearchResult,
 } from "@/types/researchPipeline";
+import { runHookedDraftStage } from "./tweetDrafting";
 
 export type PipelineStage =
   | "belief"
@@ -36,75 +38,10 @@ export interface ChainRequest {
   contentTopic?: string;
 }
 
-type SkillResult = {
-  warnings: string[];
-};
-
 type BeliefSkillOutput = { beliefs: Belief[] };
 type EvidenceSkillOutput = { evidenceNeeds: EvidenceNeed[] };
 type ResearchSkillOutput = { research: ResearchResult[]; newFindingsPersisted?: number };
 type HookSkillOutput = HookOutput;
-type DraftSkillOutput = { drafts: string[]; facts_used?: string[]; rationale?: string };
-type CriticSkillOutput = {
-  scores?: Array<Record<string, unknown>>;
-  weakestIndices?: number[];
-  rewrites?: Record<string, string>;
-  finalTweets: string[];
-};
-
-function withAliases(args: Record<string, unknown>): Record<string, unknown> {
-  const aliased = { ...args };
-
-  for (const [key, value] of Object.entries(args)) {
-    const upperSnake = key.replace(/([A-Z])/g, "_$1").toUpperCase();
-    if (!(upperSnake in aliased)) {
-      aliased[upperSnake] = value;
-    }
-  }
-
-  return aliased;
-}
-
-function collectWarnings(...results: SkillResult[]): string[] {
-  return results.flatMap((result) => result.warnings);
-}
-
-async function runDraftStage(
-  topic: string,
-  narrative: NarrativeOutput,
-  hooks: HookOutput,
-  tweetStyle = "catchphrase",
-  archetype?: string,
-  opts: { verbose?: boolean } = {}
-) {
-  const draftArgs = withAliases({
-    topic,
-    narrative,
-    hooks,
-    style: tweetStyle,
-    archetype,
-    contentTopic: archetype,
-  });
-
-  const draftResult = await executeSkill<DraftSkillOutput>("draft-tweet", draftArgs, opts);
-  const criticArgs = withAliases({
-    topic,
-    narrative,
-    drafts: draftResult.output.drafts,
-    style: tweetStyle,
-    archetype,
-    contentTopic: archetype,
-  });
-  const criticResult = await executeSkill<CriticSkillOutput>("critic", criticArgs, opts);
-
-  return {
-    draft: draftResult.output,
-    critic: criticResult.output,
-    tweets: criticResult.output.finalTweets,
-    warnings: collectWarnings(draftResult, criticResult),
-  };
-}
-
 export async function runResearchPipelineStage(
   input: StageRequest,
   opts: { verbose?: boolean } = {}
@@ -175,7 +112,7 @@ export async function runResearchPipelineStage(
       if (!input.narrative || !input.hooks) {
         throw new Error("Narrative and hooks required for draft stage");
       }
-      const result = await runDraftStage(
+      const result = await runHookedDraftStage(
         topic,
         input.narrative,
         input.hooks,
@@ -220,7 +157,7 @@ export async function runResearchPipelineChain(
     withAliases({ topic, narrative: narrative.output, archetype, contentTopic: archetype }),
     opts
   );
-  const draft = await runDraftStage(
+  const draft = await runHookedDraftStage(
     topic,
     narrative.output,
     hook.output,

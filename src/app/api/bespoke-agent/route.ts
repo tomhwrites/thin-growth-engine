@@ -1,20 +1,15 @@
 import { NextResponse } from "next/server";
-import {
-  getExemplarsForStyle,
-  runBeliefAgent,
-  runEvidenceAgent,
-  runHookAgent,
-  runNarrativeAgent,
-  runResearchAgent,
-  runStandaloneTweetCriticRewrite,
-  runTweetDrafter,
-  type Belief,
-  type EvidenceNeed,
-  type HookOutput,
-  type NarrativeOutput,
-  type ResearchResult,
-} from "@/utils/agents";
+import { executeSkill } from "@/harness/execute";
+import { withAliases } from "@/lib/skillArgs";
 import { hookTypeOptions, tweetStyles, type HookType } from "@/utils/tweetConfig";
+import type {
+  Belief,
+  EvidenceNeed,
+  HookOutput,
+  NarrativeOutput,
+  ResearchResult,
+  SupportingDatum,
+} from "@/types/researchPipeline";
 
 type BespokeAgentKey =
   | "belief"
@@ -59,13 +54,14 @@ function parseBeliefsInput(inputText: string): Belief[] {
         .map((line) => line.trim())
         .filter(Boolean);
 
-      const beliefLine =
-        lines.find((line) => !/^why it matters:/i.test(line)) || "";
+      const beliefLine = lines.find((line) => !/^why it matters:/i.test(line)) || "";
       const whyLine = lines.find((line) => /^why it matters:/i.test(line)) || "";
+      const criterionLine = lines.find((line) => /^criterion:/i.test(line)) || "";
 
       return {
         belief: cleanLine(beliefLine).replace(/^belief:\s*/i, "").trim(),
         whyItMatters: whyLine.replace(/^why it matters:\s*/i, "").trim(),
+        criterion: criterionLine.replace(/^criterion:\s*/i, "").trim(),
       };
     })
     .filter((item) => item.belief.length > 0);
@@ -76,7 +72,24 @@ function parseBeliefsInput(inputText: string): Belief[] {
     .split("\n")
     .map((line) => cleanLine(line))
     .filter(Boolean)
-    .map((belief) => ({ belief, whyItMatters: "" }));
+    .map((belief) => ({ belief, whyItMatters: "", criterion: "" }));
+}
+
+function parseEvidencePoint(line: string, index: number) {
+  const cleaned = cleanLine(line);
+  const rankMatch = cleaned.match(/\[?rank\s*(\d+)\]?/i) || cleaned.match(/^\[(\d+)\]/);
+  const metricMatch = cleaned.match(/metric:\s*([^|]+?)(?=\s*\||$)/i);
+  const sourceMatch = cleaned.match(/source:\s*([^|]+?)(?=\s*\||$)/i);
+  const bullishMatch = cleaned.match(/bullish signal:\s*([^|]+?)(?=\s*\||$)/i);
+  const whyMatch = cleaned.match(/why(?: compelling)?:\s*(.+)$/i);
+
+  return {
+    rank: rankMatch ? Number(rankMatch[1]) : index + 1,
+    metric: (metricMatch?.[1] || cleaned).trim(),
+    sourceType: (sourceMatch?.[1] || "unspecified").trim(),
+    bullishSignal: (bullishMatch?.[1] || "bullish evidence").trim(),
+    whyCompelling: (whyMatch?.[1] || "").trim(),
+  };
 }
 
 function parseEvidenceNeedsInput(inputText: string, topic: string): EvidenceNeed[] {
@@ -97,13 +110,12 @@ function parseEvidenceNeedsInput(inputText: string, topic: string): EvidenceNeed
       const beliefLine =
         lines.find((line) => !/^data needed:/i.test(line) && !/^[-*•]/.test(line)) ||
         lines[0];
+
       const dataPointsNeeded = lines
         .filter((line) => line !== beliefLine)
-        .map((line) => line.replace(/^[-*•]\s*/, ""))
-        .map((line) => line.replace(/^evidence needed:\s*/i, ""))
-        .map((line) => line.replace(/^data needed:\s*/i, ""))
-        .map((line) => line.trim())
-        .filter(Boolean);
+        .map((line) => line.replace(/^[-*•]\s*/, "").replace(/^data needed:\s*/i, ""))
+        .filter(Boolean)
+        .map((line, index) => parseEvidencePoint(line, index));
 
       return {
         belief: cleanLine(beliefLine).replace(/^belief:\s*/i, "").trim(),
@@ -122,8 +134,28 @@ function parseEvidenceNeedsInput(inputText: string, topic: string): EvidenceNeed
     .filter(Boolean);
 
   return flatDataPoints.length > 0
-    ? [{ belief: topic, dataPointsNeeded: flatDataPoints }]
+    ? [
+        {
+          belief: topic,
+          dataPointsNeeded: flatDataPoints.map((line, index) =>
+            parseEvidencePoint(line, index)
+          ),
+        },
+      ]
     : [];
+}
+
+function parseResearchFinding(line: string) {
+  const cleaned = cleanLine(line);
+  const claimMatch = cleaned.match(/claim:\s*([^|]+?)(?=\s*\||$)/i);
+  const sourceMatch = cleaned.match(/source:\s*([^|]+?)(?=\s*\||$)/i);
+  const reusedMatch = cleaned.match(/reused:\s*(true|false)/i);
+
+  return {
+    claim: (claimMatch?.[1] || cleaned).trim(),
+    sourceUrl: (sourceMatch?.[1] || "").trim(),
+    reused: reusedMatch?.[1]?.toLowerCase() === "true",
+  };
 }
 
 function parseResearchInput(inputText: string, topic: string): ResearchResult[] {
@@ -144,12 +176,12 @@ function parseResearchInput(inputText: string, topic: string): ResearchResult[] 
       const beliefLine =
         lines.find((line) => !/^finding:/i.test(line) && !/^[-*•]/.test(line)) ||
         lines[0];
+
       const findings = lines
         .filter((line) => line !== beliefLine)
-        .map((line) => line.replace(/^[-*•]\s*/, ""))
-        .map((line) => line.replace(/^finding:\s*/i, ""))
-        .map((line) => line.trim())
-        .filter(Boolean);
+        .map((line) => line.replace(/^[-*•]\s*/, "").replace(/^finding:\s*/i, ""))
+        .filter(Boolean)
+        .map(parseResearchFinding);
 
       return {
         belief: cleanLine(beliefLine).replace(/^belief:\s*/i, "").trim(),
@@ -167,7 +199,20 @@ function parseResearchInput(inputText: string, topic: string): ResearchResult[] 
     .map((line) => cleanLine(line))
     .filter(Boolean);
 
-  return flatFindings.length > 0 ? [{ belief: topic, findings: flatFindings }] : [];
+  return flatFindings.length > 0
+    ? [{ belief: topic, findings: flatFindings.map(parseResearchFinding) }]
+    : [];
+}
+
+function parseSupportingDatum(line: string): SupportingDatum {
+  const cleaned = cleanLine(line);
+  const sourceMatch = cleaned.match(/\|\s*Source:\s*(.+)$/i);
+  const claim = cleaned.replace(/\|\s*Source:\s*.+$/i, "").trim();
+
+  return {
+    claim,
+    sourceUrl: sourceMatch?.[1]?.trim() || "",
+  };
 }
 
 function parseNarrativeInput(inputText: string): NarrativeOutput {
@@ -176,8 +221,8 @@ function parseNarrativeInput(inputText: string): NarrativeOutput {
   const dataSection = inputText.split(/Data:\s*/i)[1] || "";
   const supportingData = dataSection
     .split("\n")
-    .map((line) => cleanLine(line))
-    .filter(Boolean);
+    .map(parseSupportingDatum)
+    .filter((item) => item.claim.length > 0);
 
   const fallbackLines = inputText
     .split("\n")
@@ -202,9 +247,7 @@ function parseDraftInput(inputText: string): {
     .map((line) => cleanLine(line))
     .filter(Boolean)
     .map((line) => {
-      const typedMatch = line.match(
-        /^\s*(?:\[(.+?)\]|([^:]+)):\s*(.+)\s*$/i
-      );
+      const typedMatch = line.match(/^\s*(?:\[(.+?)\]|([^:]+)):\s*(.+)\s*$/i);
 
       if (typedMatch) {
         const typeCandidate = (typedMatch[1] || typedMatch[2] || "").trim();
@@ -235,7 +278,9 @@ function formatBeliefs(beliefs: Belief[]) {
   return beliefs
     .map(
       (belief, index) =>
-        `${index + 1}. ${belief.belief}\nWhy it matters: ${belief.whyItMatters || "(none)"}`
+        `${index + 1}. ${belief.belief}\nWhy it matters: ${belief.whyItMatters || "(none)"}${
+          belief.criterion ? `\nCriterion: ${belief.criterion}` : ""
+        }`
     )
     .join("\n\n");
 }
@@ -245,7 +290,12 @@ function formatEvidenceNeeds(evidenceNeeds: EvidenceNeed[]) {
     .map(
       (need, index) =>
         `Belief ${index + 1}: ${need.belief}\n${need.dataPointsNeeded
-          .map((item) => `- ${item}`)
+          .map(
+            (item) =>
+              `- [${item.rank ?? "?"}] Metric: ${item.metric} | Source: ${item.sourceType} | Bullish signal: ${item.bullishSignal}${
+                item.whyCompelling ? ` | Why: ${item.whyCompelling}` : ""
+              }`
+          )
           .join("\n")}`
     )
     .join("\n\n");
@@ -256,7 +306,12 @@ function formatResearchResults(research: ResearchResult[]) {
     .map(
       (result, index) =>
         `Belief ${index + 1}: ${result.belief}\n${result.findings
-          .map((finding) => `- ${finding}`)
+          .map(
+            (finding) =>
+              `- Claim: ${finding.claim} | Source: ${finding.sourceUrl || "(none)"} | Reused: ${
+                finding.reused ? "true" : "false"
+              }`
+          )
           .join("\n")}`
     )
     .join("\n\n");
@@ -268,7 +323,10 @@ function formatNarrative(narrative: NarrativeOutput) {
     `Angle: ${narrative.angle || "(none)"}`,
     "Data:",
     ...(narrative.supportingData.length > 0
-      ? narrative.supportingData.map((item) => `- ${item}`)
+      ? narrative.supportingData.map(
+          (item) =>
+            `- ${item.claim}${item.sourceUrl ? ` | Source: ${item.sourceUrl}` : ""}`
+        )
       : ["- (none)"]),
   ].join("\n");
 }
@@ -300,8 +358,11 @@ export async function POST(request: Request) {
 
     switch (agent) {
       case "belief": {
-        const beliefs = await runBeliefAgent(inputText || topic);
-        return NextResponse.json({ outputText: formatBeliefs(beliefs) });
+        const result = await executeSkill<{ beliefs: Belief[] }>(
+          "belief",
+          withAliases({ topic: inputText || topic })
+        );
+        return NextResponse.json({ outputText: formatBeliefs(result.output.beliefs) });
       }
 
       case "evidence": {
@@ -313,8 +374,11 @@ export async function POST(request: Request) {
           );
         }
 
-        const evidenceNeeds = await runEvidenceAgent(topic, beliefs);
-        return NextResponse.json({ outputText: formatEvidenceNeeds(evidenceNeeds) });
+        const result = await executeSkill<{ evidenceNeeds: EvidenceNeed[] }>(
+          "evidence",
+          withAliases({ topic, beliefs })
+        );
+        return NextResponse.json({ outputText: formatEvidenceNeeds(result.output.evidenceNeeds) });
       }
 
       case "research": {
@@ -326,8 +390,11 @@ export async function POST(request: Request) {
           );
         }
 
-        const research = await runResearchAgent(topic, evidenceNeeds);
-        return NextResponse.json({ outputText: formatResearchResults(research) });
+        const result = await executeSkill<{ research: ResearchResult[] }>(
+          "research",
+          withAliases({ topic, evidenceNeeds })
+        );
+        return NextResponse.json({ outputText: formatResearchResults(result.output.research) });
       }
 
       case "narrative": {
@@ -339,8 +406,11 @@ export async function POST(request: Request) {
           );
         }
 
-        const narrative = await runNarrativeAgent(topic, research);
-        return NextResponse.json({ outputText: formatNarrative(narrative) });
+        const result = await executeSkill<NarrativeOutput>(
+          "narrative",
+          withAliases({ topic, research })
+        );
+        return NextResponse.json({ outputText: formatNarrative(result.output) });
       }
 
       case "hook": {
@@ -352,8 +422,11 @@ export async function POST(request: Request) {
           );
         }
 
-        const hooks = await runHookAgent(topic, narrative);
-        return NextResponse.json({ outputText: formatHooks(hooks) });
+        const result = await executeSkill<HookOutput>(
+          "hook",
+          withAliases({ topic, narrative, archetype, contentTopic: archetype })
+        );
+        return NextResponse.json({ outputText: formatHooks(result.output) });
       }
 
       case "draft": {
@@ -365,19 +438,19 @@ export async function POST(request: Request) {
           );
         }
 
-        const exemplars = await getExemplarsForStyle(tweetStyle, archetype);
-        const tweets = await runTweetDrafter(
-          topic,
-          narrative,
-          hooks,
-          selectedStyle.name,
-          selectedStyle.description,
-          exemplars,
-          archetype,
-          { skipCritic: true }
+        const result = await executeSkill<{ drafts: string[] }>(
+          "draft-tweet",
+          withAliases({
+            topic,
+            narrative,
+            hooks,
+            style: tweetStyle,
+            archetype,
+            contentTopic: archetype,
+          })
         );
 
-        return NextResponse.json({ outputText: formatTweets(tweets) });
+        return NextResponse.json({ outputText: formatTweets(result.output.drafts) });
       }
 
       case "critic": {
@@ -388,20 +461,25 @@ export async function POST(request: Request) {
           );
         }
 
-        const exemplars = await getExemplarsForStyle(tweetStyle, archetype);
-        const critique = await runStandaloneTweetCriticRewrite(
-          inputText,
-          topic,
-          selectedStyle.name,
-          selectedStyle.description,
-          exemplars,
-          archetype
+        const result = await executeSkill<{
+          rationale: string;
+          rewrittenTweet: string;
+        }>(
+          "critic-rewrite",
+          withAliases({
+            draft: inputText,
+            topic,
+            style: tweetStyle,
+            styleDescription: selectedStyle.description,
+            archetype,
+            contentTopic: archetype,
+          })
         );
 
         const outputText = [
-          critique.rationale ? `Rationale: ${critique.rationale}` : "",
+          result.output.rationale ? `Rationale: ${result.output.rationale}` : "",
           "Rewrite:",
-          critique.rewrittenTweet,
+          result.output.rewrittenTweet,
         ]
           .filter(Boolean)
           .join("\n\n");

@@ -1,7 +1,8 @@
 // app/api/fetchMetrics/route.ts
 import { NextResponse } from "next/server";
 import { Metric } from "@/components/TweetGenerator";
-import { runMetricResearchAgent } from "@/utils/agents";
+import { executeSkill } from "@/harness/execute";
+import { withAliases } from "@/lib/skillArgs";
 
 // Define the expected request body type
 interface FetchMetricsRequest {
@@ -17,7 +18,11 @@ interface FetchMetricsResponse {
 export async function POST(request: Request) {
   try {
     const { topic } = (await request.json()) as FetchMetricsRequest;
-    const { metrics, overarchingNarrative } = await runMetricResearchAgent(topic);
+    const result = await executeSkill<{
+      metrics: string[];
+      overarchingNarrative: string;
+    }>("metrics", withAliases({ topic }));
+    const { metrics, overarchingNarrative } = result.output;
 
     const formattedMetrics: Metric[] = metrics.map((metric, index) => ({
       id: index.toString(),

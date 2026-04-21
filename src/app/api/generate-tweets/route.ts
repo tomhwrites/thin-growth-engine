@@ -1,15 +1,11 @@
 // app/api/generate-tweets/route.ts
 import { NextResponse } from "next/server";
+import { executeSkill } from "@/harness/execute";
+import { withAliases } from "@/lib/skillArgs";
 import {
   generateTweetsFromOpenAI,
   GenerateTweetsRequest,
 } from "@/utils/generateFromOpenAI";
-import {
-  runTweetDrafter,
-  getExemplarsForStyle,
-  NarrativeOutput,
-  HookOutput,
-} from "@/utils/agents";
 import { tweetStyles } from "@/utils/tweetConfig";
 
 export async function POST(request: Request) {
@@ -49,31 +45,25 @@ export async function POST(request: Request) {
       tweetStyles[requestData.tweetStyle as keyof typeof tweetStyles] ||
       tweetStyles.catchphrase;
 
-    const exemplarText = await getExemplarsForStyle(
-      requestData.tweetStyle as string,
-      requestData.archetype ?? requestData.contentTopic
+    const result = await executeSkill<{
+      tweets: string[];
+      factsUsed?: string[];
+      rationale?: string;
+    }>(
+      "direct-draft",
+      withAliases({
+        topic: requestData.topic,
+        narrative: requestData.overarchingNarrative || requestData.topic,
+        metrics: requestData.selectedMetrics,
+        style: requestData.tweetStyle,
+        styleName: selectedStyle.name,
+        styleDescription: selectedStyle.description,
+        archetype: requestData.archetype ?? requestData.contentTopic,
+        contentTopic: requestData.archetype ?? requestData.contentTopic,
+      })
     );
 
-    // Adapt the direct-path inputs into the shared drafter's shape so both
-    // entrypoints go through the same prompt template in runTweetDrafter.
-    const narrative: NarrativeOutput = {
-      insight: requestData.overarchingNarrative || "",
-      angle: "",
-      supportingData: requestData.selectedMetrics,
-    };
-    const hooks: HookOutput = { hooks: [] };
-
-    const tweets = await runTweetDrafter(
-      requestData.topic,
-      narrative,
-      hooks,
-      selectedStyle.name,
-      selectedStyle.description,
-      exemplarText,
-      requestData.archetype ?? requestData.contentTopic
-    );
-
-    return NextResponse.json({ tweets });
+    return NextResponse.json({ tweets: result.output.tweets });
   } catch (error: any) {
     console.error("Error generating tweets:", error?.message || error);
     return NextResponse.json(

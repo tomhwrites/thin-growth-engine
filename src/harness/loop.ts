@@ -1,91 +1,71 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { getToolDefinitions, runTool } from "./tools";
-import { loadContext, loadLearned } from "./resolver";
-
-const skillsRoot = join(process.cwd(), "skills");
-
-type Skill = {
-  name: string;
-  description: string;
-  tools: string[];
-  context: string[];
-  webSearch: boolean;
-  maxWebSearches: number;
-  maxTokens: number;
-  maxSteps: number;
-  body: string;
-};
-
-function parseList(value: string): string[] {
-  const match = value.match(/\[(.*)\]/);
-  if (!match) return [];
-  return match[1]
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-async function loadSkill(name: string): Promise<Skill> {
-  const path = join(skillsRoot, `${name}.md`);
-  const raw = await readFile(path, "utf8");
-  const m = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
-  if (!m) throw new Error(`Skill ${name} is missing frontmatter`);
-  const frontmatter = m[1];
-  const body = m[2];
-
-  const get = (key: string) => {
-    const line = frontmatter.split("\n").find((l) => l.startsWith(`${key}:`));
-    return line ? line.slice(key.length + 1).trim() : "";
-  };
-
-  const parseInt10 = (s: string, fallback: number) => {
-    const n = parseInt(s, 10);
-    return Number.isFinite(n) ? n : fallback;
-  };
-
-  return {
-    name: get("name") || name,
-    description: get("description"),
-    tools: parseList(get("tools")),
-    context: parseList(get("context")),
-    webSearch: get("web_search").toLowerCase() === "true",
-    maxWebSearches: parseInt10(get("max_web_searches"), 5),
-    maxTokens: parseInt10(get("max_tokens"), 2000),
-    maxSteps: parseInt10(get("max_steps"), 10),
-    body,
-  };
-}
+import { buildSkillSystemPrompt, loadSkillDefinition } from "./skillLoader";
 
 export async function runSkill(
   skillName: string,
   args: Record<string, unknown>,
   opts: { verbose?: boolean } = {}
 ): Promise<string> {
-  const skill = await loadSkill(skillName);
-  const context = await loadContext(skill.context);
-  const learned = await loadLearned(skill.name);
+  const skill = await loadSkillDefinition(skillName);
   const customTools = getToolDefinitions(skill.tools);
   const serverTools = skill.webSearch
     ? [{ type: "web_search_20250305", name: "web_search", max_uses: skill.maxWebSearches }]
     : [];
   const allTools = [...serverTools, ...customTools];
 
-  const system = [context, skill.body, learned].filter(Boolean).join("\n\n");
+  const system = await buildSkillSystemPrompt(skillName);
   const userMessage = `Run skill: ${skill.name}\n\nArguments:\n${JSON.stringify(args, null, 2)}`;
 
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: userMessage }];
 
   for (let step = 0; step < skill.maxSteps; step++) {
-    const response = await client.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: skill.maxTokens,
-      system,
-      tools: allTools.length > 0 ? (allTools as any) : undefined,
-      messages,
-    });
+    const maxAttempts = 4;
+    let response: Awaited<ReturnType<typeof client.messages.create>> | null = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        response = await client.messages.create({
+          model: "claude-sonnet-4-6",
+          max_tokens: skill.maxTokens,
+          system,
+          tools: allTools.length > 0 ? (allTools as any) : undefined,
+          messages,
+        });
+        break;
+      } catch (error: any) {
+        const status = error?.status ?? error?.response?.status;
+        const message = String(error?.message ?? "");
+        const retryable =
+          status === 429 ||
+          status === 503 ||
+          status === 529 ||
+          /rate limit/i.test(message) ||
+          /connection error/i.test(message);
+
+        if (!retryable || attempt === maxAttempts) {
+          throw error;
+        }
+
+        const retryAfterSeconds = Number(error?.headers?.get?.("retry-after"));
+        const delayMs = Number.isFinite(retryAfterSeconds)
+          ? retryAfterSeconds * 1000
+          : 1000 * 2 ** (attempt - 1) + Math.floor(Math.random() * 250);
+
+        if (opts.verbose) {
+          console.error(
+            `[runSkill:${skillName}] retrying after ${delayMs}ms due to ${status ?? "error"}`
+          );
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+
+    if (!response) {
+      throw new Error(`Skill ${skillName} failed without a response`);
+    }
 
     if (opts.verbose) {
       console.error(`[step ${step}] stop_reason=${response.stop_reason}`);

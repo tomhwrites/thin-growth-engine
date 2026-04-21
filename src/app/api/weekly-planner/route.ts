@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import {
-  runWeeklyBulkDraftAgent,
-  runWeeklySlotPlanner,
-  runWeeklySlotDraftAgent,
-  runWeeklySynthesisAgent,
-} from "@/utils/agents";
+  runWeeklyBulkDraft,
+  runWeeklyPlan,
+  runWeeklySlotDraft,
+  runWeeklySynthesis,
+} from "@/workflows/weeklyPlanner";
 import type {
   WeeklyInput,
   WeeklyPlanSlot,
@@ -57,7 +57,7 @@ export async function POST(request: Request) {
 
     switch (body.stage) {
       case "synthesize": {
-        const synthesis = await runWeeklySynthesisAgent(weeklyInput!);
+        const synthesis = await runWeeklySynthesis(weeklyInput!);
         return NextResponse.json({ synthesis });
       }
 
@@ -69,7 +69,7 @@ export async function POST(request: Request) {
           );
         }
 
-        const slots = await runWeeklySlotPlanner(weeklyInput!, body.synthesis);
+        const slots = await runWeeklyPlan(weeklyInput!, body.synthesis);
         return NextResponse.json({ slots });
       }
 
@@ -98,11 +98,7 @@ export async function POST(request: Request) {
           );
         }
 
-        const draft = await runWeeklySlotDraftAgent(
-          weeklyInput!,
-          body.synthesis,
-          slot
-        );
+        const draft = await runWeeklySlotDraft(body.synthesis, slot);
 
         return NextResponse.json({ draft });
       }
@@ -126,11 +122,7 @@ export async function POST(request: Request) {
           );
         }
 
-        const drafts: WeeklySlotDraft[] = await runWeeklyBulkDraftAgent(
-          weeklyInput!,
-          body.synthesis,
-          slots
-        );
+        const drafts: WeeklySlotDraft[] = await runWeeklyBulkDraft(body.synthesis, slots);
 
         return NextResponse.json({ drafts });
       }
