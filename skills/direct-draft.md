@@ -28,6 +28,8 @@ Every number, %, date, $ amount, proper noun fact, ranking, and time-relative cl
 3. a fact returned from `queryDataPoints`
 
 Do not derive ages, durations, or "since launch" math from dates. If "2 years old", "launched in 2024", or similar wording is not present verbatim in the grounded inputs above, do not write it.
+If a time qualifier such as `in under a year`, `<1 year`, `already`, or `since launch` appears in one grounded fact, it can only modify that exact fact. Do not transfer it onto a different metric, the overall product, or the whole tweet.
+Do not split a time qualifier fragment into its own sentence or line.
 
 # Task
 

@@ -10,6 +10,7 @@ type RelevantDataPoint = {
   sourceType: string;
   asOfDate: Date | null;
   sourceUrl: string;
+  updatedAt?: Date;
 };
 
 type GetRelevantDataPointsOptions = {
@@ -82,6 +83,114 @@ function rankDataPoints(
     const rb = rank[b.sourceType] ?? 4;
     if (ra !== rb) return ra - rb;
     return b.updatedAt.getTime() - a.updatedAt.getTime();
+  });
+}
+
+function extractClaimMagnitude(claim: string): number | null {
+  const match = claim.match(/(\d+(?:\.\d+)?)\s*(billion|million|m|b)?/i);
+  if (!match) return null;
+
+  const value = Number.parseFloat(match[1]);
+  if (!Number.isFinite(value)) return null;
+
+  const unit = (match[2] || "").toLowerCase();
+  if (unit === "billion" || unit === "b") return value * 1_000_000_000;
+  if (unit === "million" || unit === "m") return value * 1_000_000;
+  return value;
+}
+
+function getSupersessionFamily(claim: string): string | null {
+  const normalized = claim.toLowerCase();
+
+  if (
+    /\b(registered users?|wallets?|wallet|connected|onboarded)\b/.test(
+      normalized
+    ) &&
+    /\d/.test(normalized)
+  ) {
+    return "audience_scale";
+  }
+
+  if (
+    /\b(games?|titles?)\b/.test(normalized) &&
+    /\b(total|signed|onboarded|integrated|connected)\b/.test(normalized) &&
+    /\d/.test(normalized)
+  ) {
+    return "game_count";
+  }
+
+  return null;
+}
+
+function getClaimSpecificityScore(claim: string, family: string): number {
+  const normalized = claim.toLowerCase();
+
+  if (family === "audience_scale") {
+    if (/\bregistered users?\b/.test(normalized)) return 3;
+    if (/\bwallets?\b/.test(normalized)) return 2;
+    if (/\bconnected|onboarded\b/.test(normalized)) return 1;
+  }
+
+  if (family === "game_count") {
+    if (/\btotal\b/.test(normalized)) return 3;
+    if (/\bsigned\b/.test(normalized)) return 2;
+    if (/\bonboarded|connected|integrated\b/.test(normalized)) return 1;
+  }
+
+  return 0;
+}
+
+function pickPreferredClaim<
+  T extends {
+    claim: string;
+    sourceType: string;
+    updatedAt: Date;
+  },
+>(current: T, candidate: T, family: string): T {
+  const currentMagnitude = extractClaimMagnitude(current.claim);
+  const candidateMagnitude = extractClaimMagnitude(candidate.claim);
+
+  if (
+    currentMagnitude !== null &&
+    candidateMagnitude !== null &&
+    currentMagnitude !== candidateMagnitude
+  ) {
+    return candidateMagnitude > currentMagnitude ? candidate : current;
+  }
+
+  const currentSpecificity = getClaimSpecificityScore(current.claim, family);
+  const candidateSpecificity = getClaimSpecificityScore(candidate.claim, family);
+  if (candidateSpecificity !== currentSpecificity) {
+    return candidateSpecificity > currentSpecificity ? candidate : current;
+  }
+
+  return candidate.updatedAt > current.updatedAt ? candidate : current;
+}
+
+function suppressSupersededRows<
+  T extends {
+    claim: string;
+    sourceType: string;
+    updatedAt: Date;
+  },
+>(rows: T[]): T[] {
+  const preferredByFamily = new Map<string, T>();
+
+  for (const row of rows) {
+    const family = getSupersessionFamily(row.claim);
+    if (!family || row.sourceType !== "immutable") continue;
+
+    const current = preferredByFamily.get(family);
+    preferredByFamily.set(
+      family,
+      current ? pickPreferredClaim(current, row, family) : row
+    );
+  }
+
+  return rows.filter((row) => {
+    const family = getSupersessionFamily(row.claim);
+    if (!family || row.sourceType !== "immutable") return true;
+    return preferredByFamily.get(family) === row;
   });
 }
 
@@ -164,7 +273,7 @@ export async function getRelevantDataPoints(
     }
   }
 
-  const rows = Array.from(rowsById.values());
+  const rows = suppressSupersededRows(Array.from(rowsById.values()));
   rankDataPoints(rows);
 
   return rows.slice(0, limit).map((r) => ({
@@ -173,6 +282,7 @@ export async function getRelevantDataPoints(
     sourceType: r.sourceType,
     asOfDate: r.asOfDate,
     sourceUrl: r.sourceUrl,
+    updatedAt: r.updatedAt,
   }));
 }
 

@@ -34,6 +34,8 @@ Every number, %, date, $ amount, proper noun fact, ranking, and time-relative cl
 3. `LIVE_RESEARCH`
 
 Do not derive ages, durations, or "since launch" math from dates. If a relative age is not supplied verbatim, do not write it.
+If a time qualifier such as `in under a year`, `<1 year`, `already`, or `since launch` appears in one grounded fact, it can only modify that exact fact. Do not transfer it onto a different metric, the overall product, or the whole tweet.
+Do not split a time qualifier fragment into its own sentence or line.
 
 # Drafting rules
 
