@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { executeSkill } from "@/harness/execute";
+import { getHookedDraftSkill } from "@/lib/skillVariants";
 import { withAliases } from "@/lib/skillArgs";
 import { hookTypeOptions, tweetStyles, type HookType } from "@/utils/tweetConfig";
 import type {
@@ -439,7 +440,7 @@ export async function POST(request: Request) {
         }
 
         const result = await executeSkill<{ drafts: string[] }>(
-          "draft-tweet",
+          getHookedDraftSkill(tweetStyle),
           withAliases({
             topic,
             narrative,

@@ -81,7 +81,7 @@ export const tweetStyles: Record<string, TweetStyle> = {
     example:
       "2021 was the craziest year of our lives.\n\n- Axie holders grew by %10,363\n- AXS staking launch\n- Ronin mainnet launch\n- Katana launch (1.2 B liquidity & 20,000+ Daily traders)\n- Axie community treasury: 2 B + in value (52,000 ETH + 21 M AXS)\n\n2022 we'll shock the world (again).",
     description:
-      "An opening hook followed by exactly 3 concise bullet points using the bullet point character '•'. Prioritise concrete metrics and proof points. The closer is optional and should be omitted if it would be vague, hypey, or non-falsifiable. Do NOT use hyphen dashes.",
+      "An opening hook followed by exactly 3 concise bullet points using the bullet point character '•'. Prioritise concrete metrics and proof points. No closer. Do NOT use hyphen dashes.",
   },
   multiparagraph: {
     name: "Multiparagraph Tweet",

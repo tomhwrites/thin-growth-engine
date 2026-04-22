@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import { buildSkillSystemPrompt } from "@/harness/skillLoader";
 import { buildDirectDraftUserPrompt } from "@/lib/directDraftPrompt";
 import { getExemplarsForStyle } from "@/lib/exemplars";
+import { getOpenAIDirectDraftSkill } from "@/lib/skillVariants";
 import { parseDelimitedTweets } from "@/lib/tweetOutput";
 import type { FactPackItem } from "@/types/factPack";
 import { tweetStyles } from "@/utils/tweetConfig";
@@ -124,7 +125,9 @@ export async function generateTweetsFromOpenAI(
       liveResearch: researchInfo,
     });
 
-    const systemPrompt = await buildSkillSystemPrompt("direct-draft-openai");
+    const systemPrompt = await buildSkillSystemPrompt(
+      getOpenAIDirectDraftSkill(tweetStyle)
+    );
 
     const tweetResponse = await openai.responses.create({
       model: "gpt-4.1",

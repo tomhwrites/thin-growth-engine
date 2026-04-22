@@ -1,4 +1,5 @@
 import { executeSkill } from "@/harness/execute";
+import { getWeeklyPairDraftSkill, getWeeklyPairRewriteSkill } from "@/lib/skillVariants";
 import { withAliases } from "@/lib/skillArgs";
 import type {
   WeeklyDraftKey,
@@ -31,6 +32,13 @@ const TIME_QUALIFIER_PATTERNS = [
   /\b(?:under|over|less than|more than)\s+(?:a|\d+\+?)\s+(?:day|days|week|weeks|month|months|year|years)\b/gi,
   /<\s*\d+\+?\s*(?:day|days|week|weeks|month|months|year|years)\b/gi,
   /\bsince launch\b/gi,
+];
+
+const FORBIDDEN_TERM_PATTERNS = [
+  /\bcrypto\b/i,
+  /\bimx\b/i,
+  /\bnfts?\b/i,
+  /\bblockchain\b/i,
 ];
 
 function normalizeText(value: string) {
@@ -92,6 +100,17 @@ function validateHookBulletsStructure(draft: string) {
     return "hookbullets drafts cannot include a closer after the 3 bullets";
   }
 
+  const longBullet = bulletLines.find((line) => {
+    const wordCount = line
+      .replace(/^•\s*/, "")
+      .split(/\s+/)
+      .filter(Boolean).length;
+    return wordCount > 10;
+  });
+  if (longBullet) {
+    return `hookbullets bullets must stay compact (max 10 words): "${longBullet}"`;
+  }
+
   return null;
 }
 
@@ -150,6 +169,14 @@ function validateSingleDraft(
     if (hookBulletsIssue) {
       issues.push({ draftKey, reason: hookBulletsIssue });
     }
+  }
+
+  const forbiddenTerm = FORBIDDEN_TERM_PATTERNS.find((pattern) => pattern.test(trimmed));
+  if (forbiddenTerm) {
+    issues.push({
+      draftKey,
+      reason: "Draft contains a forbidden tweet-voice term",
+    });
   }
 
   const groundingTokens = [
@@ -244,7 +271,7 @@ export async function runWeeklyPairDraftStage(
   });
 
   const pairResult = await executeSkill<WeeklyPairDraftResult>(
-    "weekly-draft-pair",
+    getWeeklyPairDraftSkill(input.tweetStyle),
     sharedArgs,
     opts
   );
@@ -265,7 +292,7 @@ export async function runWeeklyPairDraftStage(
   ).map(([draftKey, reasons]) => ({ draftKey, reasons }));
 
   const rewriteResult = await executeSkill<WeeklyPairDraftResult>(
-    "weekly-rewrite-pair",
+    getWeeklyPairRewriteSkill(input.tweetStyle),
     withAliases({
       ...sharedArgs,
       primaryDraft: normalizedInitial.primaryDraft,

@@ -1,4 +1,5 @@
 import { executeSkill } from "@/harness/execute";
+import { getHookedCriticSkill, getHookedDraftSkill } from "@/lib/skillVariants";
 import { withAliases } from "@/lib/skillArgs";
 import type { HookOutput, NarrativeOutput } from "@/types/researchPipeline";
 
@@ -39,6 +40,13 @@ const BANNED_CONTRAST_PATTERNS = [
   /\bdoesn'?t\s+just\s+[^.!?;\n]{1,80}\b/i,
   /\bisn'?t\s+[^.!?;\n]{1,80}\s+anymore\.\s+it'?s\s+[^.!?;\n]{1,80}\b/i,
   /\bthat(?:'s| is)\s+not\s+[^.!?;\n]{1,80}\.\s+that(?:'s| is)\s+[^.!?;\n]{1,80}\b/i,
+];
+
+const FORBIDDEN_TERM_PATTERNS = [
+  /\bcrypto\b/i,
+  /\bimx\b/i,
+  /\bnfts?\b/i,
+  /\bblockchain\b/i,
 ];
 
 function collectWarnings(...results: SkillResult[]): string[] {
@@ -102,6 +110,17 @@ function validateHookBulletsStructure(draft: string, expectedHook: string) {
   const bulletLines = lines.filter((line) => line.startsWith("•"));
   if (bulletLines.length !== 3) {
     return "hookbullets drafts must contain exactly 3 bullet lines";
+  }
+
+  const longBullet = bulletLines.find((line) => {
+    const wordCount = line
+      .replace(/^•\s*/, "")
+      .split(/\s+/)
+      .filter(Boolean).length;
+    return wordCount > 10;
+  });
+  if (longBullet) {
+    return `hookbullets bullets must stay compact (max 10 words): "${longBullet}"`;
   }
 
   return null;
@@ -190,6 +209,13 @@ function validateDraftBatch(
       });
     }
 
+    if (FORBIDDEN_TERM_PATTERNS.some((pattern) => pattern.test(trimmed))) {
+      issues.push({
+        draftIndex: index,
+        reason: "Draft contains a forbidden tweet-voice term",
+      });
+    }
+
     for (const token of collectGroundingTokens(trimmed)) {
       if (!haystack.includes(token)) {
         issues.push({
@@ -228,7 +254,11 @@ export async function runHookedDraftStage(
     contentTopic: archetype,
   });
 
-  const draftResult = await executeSkill<DraftSkillOutput>("draft-tweet", draftArgs, opts);
+  const draftResult = await executeSkill<DraftSkillOutput>(
+    getHookedDraftSkill(tweetStyle),
+    draftArgs,
+    opts
+  );
   const validationIssues = validateDraftBatch(
     draftResult.output.drafts ?? [],
     hooks,
@@ -261,7 +291,11 @@ export async function runHookedDraftStage(
     archetype,
     contentTopic: archetype,
   });
-  const criticResult = await executeSkill<CriticSkillOutput>("critic", criticArgs, opts);
+  const criticResult = await executeSkill<CriticSkillOutput>(
+    getHookedCriticSkill(tweetStyle),
+    criticArgs,
+    opts
+  );
 
   return {
     draft: draftResult.output,
