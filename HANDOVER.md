@@ -1,306 +1,592 @@
 # Handover — `thin-growth-engine`
 
-You are taking over mid-project from a prior Claude session. This document is everything you need. Read it end-to-end before touching code.
+Read this before touching code. This repo has moved materially since the original research-pipeline migration, and older assumptions about `src/utils/agents.ts` are now stale.
 
 ## TL;DR
 
-`thin-growth-engine` is a rebuild of the user's old `growth-engine` Next.js app using Gary Tan's **"Thin Harness, Fat Skills"** pattern. The old repo still works; the new one is where all new work happens. The 6-stage tweet-research pipeline (belief → evidence → research → narrative → hook → draft-tweet → critic) is **ported and working end-to-end via CLI**, and the research path in `TweetGenerator` now runs through the new harness-backed workflow instead of the old bespoke agents. Some other UI/API surfaces are still transitional.
+`thin-growth-engine` is a Next.js rebuild of the user's older `growth-engine` app using a **thin harness / fat skills** architecture:
 
-Important new reality as of this session:
-- **Google Sheets -> Supabase -> app sync for `exemplar_tweets` is now working**
-- **Google Sheet is the intended source of truth** for exemplar tweets
-- **App-facing language is now `Archetype`, not `content_topic`**
-- **Hook outputs are now typed objects** (`{ type, text }`), not bare strings
-- **`isThread` has been removed from the app surface**
+- `skills/*.md` hold model-facing behavior
+- `src/harness/*` holds generic execution, tool-use, prompt loading, parsing, and deterministic post-processing
+- `src/workflows/*` holds app-level orchestration
+- routes adapt UI/API shapes to those workflows
 
----
+As of this handover:
 
-## 1. Identity & access
+- the main staged research workflow is harness-backed
+- weekly planning is now also harness-backed
+- bespoke mode is harness-backed
+- quick metrics mode is harness-backed
+- internal-only narrative generation is harness-backed
+- direct drafting no longer depends on prompt constants in `src/utils/agents.ts`
+- sheet sync is working with explicit push / reconcile controls in the nav
+- `src/utils/agents.ts` is now effectively a compatibility shim, not the source of truth
 
-- **User:** Tom Humphrey (`tomhumphrey010@gmail.com`)
-- **GitHub:** [tomhwrites/thin-growth-engine](https://github.com/tomhwrites/thin-growth-engine) — main @ `49e04df`
-- **Most recent local commit from this session:** `5f82314` (`Wire research pipeline to thin harness workflow`)
-- **Old repo (still functional, left alone):** `/Users/tomh/growth-engine` — keep untouched unless explicitly told otherwise.
-- **New repo (your working dir):** `/Users/tomh/thin-growth-engine`
-- **Auth:** Supabase SSR with Google OAuth, locked to the email above via middleware. Anyone else who logs in gets rejected.
-- **Hosting:** none. Dropped Vercel in the rebuild. Runs locally.
+Recent important quality fixes:
 
-## 2. Architecture — read this before writing any code
+- internal-only drafting now prefers current immutable facts over older overlapping ones
+- internal-only drafting no longer reintroduces stale DB facts after metric selection
+- time qualifiers like `in under a year` are now constrained to the exact fact they came from
+- weekly planner now has a bulk draft-method control so all 15 slots can be flipped to `internal`, `quick`, or `research` at once
 
-```
-skills/                     ← FAT: markdown files, one per agent capability
-  _context/
-    business.md             ← Immutable strategic/VC context (loaded by research stages)
-    tweet-voice.md          ← voice rules (loaded only by tweet-producing skills)
-  belief.md                 ← stage 1
-  evidence.md               ← stage 2
-  research.md               ← stage 3 (web_search + DB persist)
-  narrative.md              ← stage 4 (citation-index schema)
-  hook.md                   ← stage 5
-  draft-tweet.md            ← stage 6a
-  critic.md                 ← stage 6b
+## Identity / access
 
-src/harness/                ← THIN: ~200 LOC of generic plumbing
-  loop.ts                   ← runSkill() — loads skill, runs tool-use loop vs Anthropic
-  tools.ts                  ← fetchExemplars, queryDataPoints, persistDataPoints
-  resolver.ts               ← loads _context/ files referenced by skill frontmatter
-  execute.ts                ← shared deterministic runner: runSkill + JSON parse + post-process
-  postprocess.ts            ← narrative citation resolution + grounding warnings
+- User: Tom Humphrey (`tomhumphrey010@gmail.com`)
+- Repo: `tomhwrites/thin-growth-engine`
+- Working directory: `/Users/tomh/thin-growth-engine`
+- Old repo still exists and should be left alone unless explicitly requested:
+  `/Users/tomh/growth-engine`
+- Auth: Supabase SSR + Google OAuth, restricted by middleware to Tom’s email
+- Default expectation from the user now:
+  when work is complete, commit and push by default
 
-src/workflows/
-  researchPipeline.ts       ← app-layer adapter over the harness for staged research runs
+Latest known main commits at handover:
 
-bin/ge.ts                   ← single-skill CLI driver. Uses the shared deterministic runner
-bin/ge-chain.ts             ← one-command 6-stage chain runner
+- `f078a56` `Add bulk draft mode control to weekly planner`
+- `f2db8c5` `Update generated Next env types import`
+- `a5e837c` `Prefer current immutable facts in internal drafts`
+- `7482193` `Tighten internal-only fact grounding`
+- `10981a8` `Fix sheet sync auth loopback and nav errors`
+- `c83e06b` `Port weekly and prompt-heavy flows to skills`
 
-src/app/                    ← Next.js UI. Research mode now uses the new workflow route below.
-src/app/api/research-pipeline/route.ts
-                           ← wraps `runResearchPipelineStage()`; preserves the old staged UI contract
-src/app/api/run/route.ts    ← generic `runSkill` wrapper over HTTP. Still not the main user-facing path.
-src/utils/agents.ts         ← OLD: ~1,500 LOC monolithic agent impl. TRANSITIONAL.
-                              Still used by bespoke / weekly / metrics paths and as reference material.
-```
+## Current architecture
 
-**Skill file format** (YAML frontmatter + markdown body):
+### 1. Skills = prompt authority
 
-```md
----
-name: belief
-description: ...
-params:
-  - TOPIC (required)
-context: [_context/business.md]
-tools: [queryDataPoints]
-web_search: false
-max_web_searches: 5
-max_tokens: 2000
-max_steps: 10
----
+Core skill directories/files:
 
-# Role
-...
-# Task
-...
-# Output
-```json
-{...}
-```
-```
+- `skills/_context/business.md`
+- `skills/_context/tweet-voice.md`
+- `skills/_context/weekly-planner.md`
+- `skills/belief.md`
+- `skills/evidence.md`
+- `skills/research.md`
+- `skills/narrative.md`
+- `skills/hook.md`
+- `skills/draft-tweet.md`
+- `skills/critic.md`
+- `skills/critic-rewrite.md`
+- `skills/metrics.md`
+- `skills/internal-narrative.md`
+- `skills/weekly-synthesis.md`
+- `skills/weekly-plan.md`
+- `skills/direct-draft.md`
+- `skills/direct-draft-internal.md`
+- `skills/direct-draft-openai.md`
 
-## 3. What works, what doesn't
+Rule of thumb:
 
-### Working (via CLI)
-- All 7 skills run and produce valid JSON
-- Tool use: fetchExemplars, queryDataPoints, persistDataPoints all hit Supabase via Prisma
-- Web search works (Anthropic `web_search_20250305` server tool)
-- Grounding enforced:
-  - **narrative**: model emits `citations: [{researchIndex, findingIndex}]`, and the shared deterministic runner resolves indices to verbatim claims. **Fabrication is physically impossible** — the model never emits a claim string.
-  - **hook / draft-tweet / critic**: post-hoc substring check in the shared deterministic runner. Every number in output must appear verbatim in the narrative (and `facts_used` for draft-tweet). Warning-level only.
-- Prompt caching is in place via the skill body + context composition in `loop.ts`.
-- Supabase SSR auth + Google OAuth login
-- **`npm run ge:chain -- --topic="..."` now exists and works end-to-end.**
-  - Verified in this session: full chain returned beliefs, evidenceNeeds, research, narrative, hooks, drafts, critic output, final tweets, and warnings.
-  - Verified in this session: `npm run ge -- belief --topic="Immutable Play user acquisition"` returned valid JSON.
-- **`/api/research-pipeline` is now harness-backed.**
-  - The route calls `src/workflows/researchPipeline.ts`, which uses `executeSkill()` + skill-specific deterministic post-processing.
-  - `TweetGenerator` research mode still calls `/api/research-pipeline`, but that route no longer delegates to the old bespoke agent functions for the main belief → draft flow.
-- **Research-mode UI now carries the richer structured skill payloads** instead of flattening them to strings:
-  - evidence needs stay structured
-  - research findings keep `{ claim, sourceUrl, reused }`
-  - narrative supporting data keeps `{ claim, sourceUrl }`
-- **Google Sheets exemplar sync works locally** once `.env` contains the Google service-account credentials and Supabase auth is pointed at `http://localhost:3000`
-- **Sheet pull now supports source-of-truth sync semantics** for exemplars:
-  - creates new rows in Supabase
-  - updates edited rows
-  - deletes rows from Supabase if they were deleted from the sheet
-  - backfills DB-generated `id` values into blank sheet rows
+- voice, drafting rules, falsifiability rules, output contracts, anti-hype rules:
+  go in skills
+- orchestration, parsing, ranking, DB access, sync, route contracts:
+  stay in TypeScript
 
-### Partial / known-broken
-- **Only the research path is rewired.** `BespokeAgentWorkbench.tsx`, `WeeklyPlanner.tsx`, `/api/fetchMetrics`, `/api/generate-tweets`, `/api/bespoke-agent`, and `/api/weekly-planner` are still transitional old-code surfaces.
-- **`/api/run`** still exists as a generic wrapper, but it is not the main product path. The user-facing staged research flow currently goes through `/api/research-pipeline`.
-- **Not ported to skills yet:**
-  - `runMetricResearchAgent` (feeds `/api/fetchMetrics`)
-  - 4 weekly-planner agents: `runWeeklySynthesisAgent`, `runWeeklySlotPlanner`, `runWeeklySlotDraftAgent`, `runWeeklyBulkDraftAgent`
-  - `runDeeperResearchAgent` (a deeper variant of research; current `deepen` just re-runs the stage-3 `research` skill)
-  - `runStandaloneTweetCriticRewrite` (different from our stage-6b critic)
-- **One known grounding gap still shows up in live chain output.**
-  - In this session, `ge:chain` completed successfully but the warning system caught `1M+` in a draft/final tweet because the underlying source string said `1 million`, not `1M+`.
-  - So the pipeline is working, and the warning is useful — but prompt tightening is still needed.
+### 2. Thin harness = generic skill execution
 
-### Resolved architectural choice from this session
-The user wanted the work to stay aligned with **Thin Harness, Fat Skills**. The solution chosen here was:
+Important harness files:
 
-- keep `runSkill()` itself thin
-- move deterministic narrative/grounding post-processing into shared helper modules (`src/harness/execute.ts`, `src/harness/postprocess.ts`)
-- add an app-layer workflow adapter (`src/workflows/researchPipeline.ts`) instead of thickening `/api/run`
-- preserve the existing staged `/api/research-pipeline` contract so the UI could switch to the new skill-backed workflow with minimal churn
+- `src/harness/loop.ts`
+  - loads a skill definition
+  - loads context
+  - runs Anthropic tool-use loop
+  - supports optional Anthropic web search
+  - includes retry handling for transient rate/connection issues
+- `src/harness/skillLoader.ts`
+  - loads skill frontmatter/body
+  - builds the full system prompt from contexts + skill body + learned notes
+- `src/harness/tools.ts`
+  - custom tools exposed to skills:
+    - `fetchExemplars`
+    - `persistDataPoints`
+    - `queryDataPoints`
+- `src/harness/execute.ts`
+  - shared deterministic runner used by routes/workflows
+  - runs a skill, parses JSON, applies postprocessing, returns warnings
+- `src/harness/postprocess.ts`
+  - grounding checks
+  - narrative citation resolution
 
-User said "I'll deal with this later" for the em-dash / banned-construction programmatic check — currently the critic catches some voice violations but not all. Don't spend time on that unless asked.
+### 3. Shared services / adapters
 
-Deferred TODO owned by the user:
-- Ending-style sheet/schema work is intentionally deferred and user-owned.
-- If that work is resumed later, keep the data tags user-managed in Google Sheets / Supabase and wire any prompting behavior through `skills/`, not `src/utils/agents.ts`.
+- `src/lib/dataPoints.ts`
+  - DB retrieval logic for internal facts
+  - includes immutable-topic fallback behavior
+  - now suppresses overlapping stale immutable fact families in some cases
+- `src/lib/exemplars.ts`
+  - shared exemplar lookup
+- `src/lib/googleSheets.ts`
+  - low-level Google Sheets read/write helpers
+- `src/lib/sheetSync.ts`
+  - higher-level push / pull / reconcile logic
+- `src/lib/directDraftPrompt.ts`
+  - OpenAI direct-draft user prompt assembly
+- `src/lib/skillArgs.ts`
+  - aliasing of camelCase args to uppercase snake-case prompt args
+- `src/lib/tweetOutput.ts`
+  - tweet parsing helpers
 
-## 4. Running it
+### 4. Workflow layer
 
-```bash
-# First time
-cd /Users/tomh/thin-growth-engine
-npm install        # postinstall runs prisma generate
+- `src/workflows/researchPipeline.ts`
+  - staged research workflow adapter
+- `src/workflows/tweetDrafting.ts`
+  - shared hook -> draft -> critic path
+- `src/workflows/weeklyPlanner.ts`
+  - weekly synthesis / planning / slot drafting orchestration
 
-# Single skill
-npm run ge -- belief --topic="Immutable Play user acquisition"
+### 5. Routes
 
-# Full chain
-npm run ge:chain -- --topic="Immutable Play user acquisition"
+Main user-facing routes:
 
-# Verbose mode shows tool calls
-npm run ge -- research --topic="..." --evidenceNeeds-file=tmp/evidenceNeeds.json -v
+- `src/app/api/research-pipeline/route.ts`
+- `src/app/api/fetchMetrics/route.ts`
+- `src/app/api/fetchInternalData/route.ts`
+- `src/app/api/generate-tweets/route.ts`
+- `src/app/api/weekly-planner/route.ts`
+- `src/app/api/bespoke-agent/route.ts`
+- `src/app/api/sync/pull/route.ts`
+- `src/app/api/sync/push/route.ts`
+- `src/app/api/sync/reconcile/route.ts`
 
-# UI (research mode now uses the harness-backed staged route; root redirects to /login if unauthenticated)
-npm run dev
-```
+### 6. Transitional file
 
-Files named `tmp/*.json` are gitignored smoke-test artifacts.
+- `src/utils/agents.ts`
 
-## 5. Critical gotchas
+This file is no longer prompt authority. It should be treated as a compatibility surface only. Do not grow new prompt logic there.
 
-- **Model ID is `claude-sonnet-4-6`**, not 4-5. Do not "fix" this back to 4-5.
-- **Knowledge cutoff**: January 2026. Today's date per the parent session was 2026-04-20.
-- **`dotenv` must use `{ override: true }`** in `bin/ge.ts`. The user's shell had `ANTHROPIC_API_KEY=""` exported (length 0), which blocked dotenv loading until we set override.
-- **`skillsRoot` uses `process.cwd()`**, not `import.meta.url`, in both `src/harness/loop.ts` and `src/harness/resolver.ts`. Next.js bundling breaks `import.meta.url`.
-- **Narrative output schema is forbidden from containing `supportingData`, `claim`, `sourceUrl`, or `findings` keys at the model level.** `bin/ge.ts` hard-fails if the model emits those. It must emit `citations: [{researchIndex, findingIndex}]`. The CLI post-processor rewrites the output shape to include `supportingData` for downstream consumers — downstream sees `{insight, angle, supportingData}` as normal. Don't remove the hard-fail; it's load-bearing.
-- **Research stage 3 writes to DB in real-time** via `persistDataPoints`. Re-running a topic doesn't double-insert because the skill reuses existing rows via `queryDataPoints` first. But if you're iterating, be aware.
-- **Prisma model is `dataPoints`** (camelCase) — confirm by reading `prisma/schema.prisma` before any DB work.
-- **`facts_used` in draft-tweet output** is semantically load-bearing for the grounding check. If the model drops this field, the check has less to validate against.
-- **`ge:chain` is now the fastest legit smoke test for the rebuilt pipeline.**
-  - If someone is still manually chaining stages with temp JSON files, they are working from stale assumptions.
-- **`deepen` is currently not a true deeper-research skill.**
-  - In `src/workflows/researchPipeline.ts`, `deepen` currently re-runs the stage-3 `research` skill.
-  - Do not assume it reproduces the behavior of the old `runDeeperResearchAgent`.
-- **Google Sheets sync semantics changed materially in this session:**
-  - `/api/sync/pull` is the safe/default path for `exemplar_tweets`
-  - `/api/sync/push` skips `exemplar_tweets` unless explicitly called with `?includeExemplars=true`
-  - do not assume push is a harmless merge; for exemplars it is now intentionally opt-in
-- **The exemplar sheet schema changed.** The canonical sheet header for exemplars is now:
-  - `id, tweet_text, archetype, tweet_style, hook_value, archived, createdAt, updatedAt`
-  - `subtopic` is no longer required
-  - `isThread` is no longer used by the app
-- **The app-facing name is `archetype`, but the physical Postgres column is still `content_topic`.**
-  - Prisma handles this via `@map("content_topic")`
-  - do not blindly rename the DB column unless explicitly asked
-- **Typed hooks are now load-bearing.**
-  - `HookOutput` is `{ hooks: [{ type, text }] }`
-  - if you touch hook consumers, do not regress them back to `string[]`
-- **Current hook taxonomy is exactly:**
-  - `Thesis statement`
-  - `Curiosity Gap`
-  - `Short`
-  - `Long`
-  - `Data`
-- **Current tweet-style additions from the sheet include `Big para` and `Stacked lines`.**
-  - if you touch style mappings, preserve support for them
-- **Local auth matters for sync.**
-  - if Google OAuth sends the user back to the old Vercel URL, Supabase auth URL config is wrong
-  - local setup should use `http://localhost:3000` and include `/auth/callback` in allowed redirects
-- **Auth middleware affects local verification.**
-  - Unauthenticated requests to `/` and `/api/research-pipeline` redirect to `/login`
-  - this is expected and does not mean the route is broken
+## Data model and sync model
 
-## 6. Environment
+### DB tables that matter
 
-`.env` required keys (already set; do not echo):
+#### `DataPoints`
+
+Used for reusable factual claims.
+
+Fields that matter most:
+
+- `claim`
+- `category`
+- `sourceUrl`
+- `sourceType`
+- `asOfDate`
+- `archived`
+- `updatedAt`
+
+Current `sourceType` meanings in practice:
+
+- `immutable` = curated Immutable-specific fact
+- `verified`
+- `manual`
+- `agent`
+
+#### `ExemplarTweets`
+
+Used for style / archetype exemplars.
+
+User-facing label is `archetype`, but physical DB column remains `content_topic` via Prisma `@map`.
+
+### Google Sheets tabs
+
+The app’s sync model now assumes these tabs:
+
+- `data_points`
+- `immutable_facts`
+- `exemplar_tweets`
+
+Current intended source-of-truth model:
+
+- `data_points`
+  - runtime source is DB
+  - sheet is an edit/sync surface
+- `immutable_facts`
+  - curated fact sheet for Immutable-specific reusable facts
+  - pulled into `DataPoints` with `sourceType = "immutable"`
+- `exemplar_tweets`
+  - sheet is intended source of truth
+  - push is opt-in for exemplars
+  - pull / reconcile is the normal path
+
+### Sync behavior
+
+Top nav now exposes:
+
+- `Push research to sheet`
+  - DB -> sheet
+  - pushes `data_points` and `immutable_facts`
+  - does not push exemplars unless explicitly requested at the route level
+- `Reconcile sheet edits`
+  - pull sheet -> DB
+  - then push DB -> sheet
+
+Important fix from this session history:
+
+`/api/sync/reconcile` no longer calls `/api/sync/pull` and `/api/sync/push` via authenticated loopback HTTP. It now executes shared sync functions directly via `src/lib/sheetSync.ts`, which fixed the HTML/login-page JSON parse failure.
+
+## Current user-facing workflows
+
+### 1. Single tweet generator — deep research
+
+UI:
+
+- `src/components/TweetGenerator.tsx`
+
+Route:
+
+- `/api/research-pipeline`
+
+Workflow:
+
+- `belief`
+- `evidence`
+- `research`
+- `narrative`
+- `hook`
+- `draft-tweet`
+- `critic`
+
+Key files:
+
+- `src/workflows/researchPipeline.ts`
+- `src/workflows/tweetDrafting.ts`
+
+Data sources:
+
+- existing DB facts via `queryDataPoints`
+- live web search in `research` skill
+- exemplar DB rows via `fetchExemplars`
+
+Writes:
+
+- new research findings can be persisted to `DataPoints`
+
+### 2. Single tweet generator — quick research
+
+UI:
+
+- `TweetGenerator` with `dataSource = "quick"`
+
+Routes:
+
+- `/api/fetchMetrics`
+- `/api/generate-tweets`
+
+Workflow:
+
+- `metrics`
+- `direct-draft` for Anthropic path
+- `direct-draft-openai` system prompt for OpenAI path
+
+Data sources:
+
+- live web research through the `metrics` skill
+- exemplar lookup during direct drafting
+- additional DB facts via `queryDataPoints` in the Anthropic direct-draft skill
+
+No staged belief/evidence/research pipeline here; this is a shortcut path.
+
+### 3. Single tweet generator — internal only
+
+UI:
+
+- `TweetGenerator` with `dataSource = "internal"`
+
+Routes:
+
+- `/api/fetchInternalData`
+- `/api/generate-tweets`
+
+Workflow:
+
+- retrieve relevant `DataPoints` via `getRelevantDataPoints(...)`
+- run `internal-narrative`
+- run `direct-draft-internal` for Anthropic path
+- OpenAI path skips live web search when `dataSource = "internal"`
+
+Data sources:
+
+- DB only
+- especially `DataPoints` rows including `sourceType = "immutable"`
+
+Important recent fixes:
+
+- retrieval now includes immutable-topic fallback for Immutable-related prompts
+- internal-only drafting no longer does an extra fact lookup that can reintroduce stale rows
+- overlapping stale immutable metrics are partially suppressed
+- time qualifiers cannot be detached and reapplied to other facts
+
+### 4. Weekly planner
+
+UI:
+
+- `src/components/WeeklyPlanner.tsx`
+
+Route:
+
+- `/api/weekly-planner`
+
+Workflow orchestration:
+
+- `src/workflows/weeklyPlanner.ts`
+
+Subflows:
+
+- `synthesize` -> `weekly-synthesis`
+- `plan` -> `weekly-plan`
+- `draft_slot` / `draft_all` -> one of:
+  - research mode
+  - quick mode
+  - internal mode
+
+Weekly drafting modes:
+
+- `research`
+  - belief -> evidence -> research -> narrative -> hook -> draft-tweet -> critic
+- `quick`
+  - metrics -> hook -> draft-tweet -> critic
+- `internal`
+  - DB fact retrieval -> internal narrative assembly -> hook -> draft-tweet -> critic
+
+Recent weekly changes:
+
+- weekly planner migrated off old inline prompt authority and onto skills/workflows
+- a bulk draft-mode control now lets the user set all 15 slots to `internal`, `quick`, or `research`
+
+Current default 15-slot BAU sequence:
+
+1. Payments -> comparison
+2. Identity / Attribution -> multiparagraph
+3. New combined Web3 thesis -> multiparagraph
+4. Product Launch / Update -> comparison
+5. Partner Game Announcement -> hookbullets
+6. Partner Traction / Proof Point -> comparison
+7. Ecosystem Traction -> hookbullets
+8. Web2 will become Web3 -> multiparagraph
+9. Macro trends / Regulation -> multiparagraph
+10. Vision / Industry Thesis -> multiparagraph
+11. Signing Preannouncement -> oneliner
+12. Mobile gaming -> hookbullets
+13. AI gaming -> multiparagraph
+14. Community engagement -> oneliner
+15. Web3 gaming = Future -> hookbullets
+
+Subtle but important default behavior:
+
+- empty planner slots default to `draftMode = "research"`
+- clicking `Use Default Weekly Schedule` builds BAU slots with `draftMode = "quick"`
+
+### 5. Bespoke agent workbench
+
+UI:
+
+- `src/components/BespokeAgentWorkbench.tsx`
+
+Route:
+
+- `/api/bespoke-agent`
+
+Workflow:
+
+- route parses the freeform UI text into structured payloads
+- then calls skills via `executeSkill()`
+- stages supported:
+  - belief
+  - evidence
+  - research
+  - narrative
+  - hook
+  - draft
+  - critic
+
+Special case:
+
+- `critic` uses `critic-rewrite`, not the standard stage-6 `critic`
+
+This path is harness-backed but still has a custom parsing/formatting adapter layer in the route.
+
+## Harness tools and where skills get info from
+
+### `fetchExemplars`
+
+Source:
+
+- `ExemplarTweets` DB table
+
+Used by:
+
+- `hook`
+- `draft-tweet`
+- `direct-draft`
+- `direct-draft-internal`
+
+Purpose:
+
+- structural reference by form/style
+- content-angle reference by archetype
+- hook pattern reference by hook type
+
+### `queryDataPoints`
+
+Source:
+
+- `DataPoints` DB table
+
+Ranking:
+
+- `immutable` > `verified` > `manual` > `agent`
+
+Used by:
+
+- `belief` indirectly via skill/tool usage if requested
+- `research`
+- `draft-tweet`
+- `direct-draft`
+
+Not used by:
+
+- `direct-draft-internal`
+
+### `persistDataPoints`
+
+Writes to:
+
+- `DataPoints`
+
+Used by:
+
+- `research`
+
+Purpose:
+
+- save new reusable findings discovered by research
+
+### Anthropic web search
+
+Enabled only for skills whose frontmatter sets `web_search: true`.
+
+Main web-searching skills:
+
+- `research`
+- `metrics`
+
+Not used by:
+
+- `internal-narrative`
+- `direct-draft-internal`
+- weekly internal mode
+
+## Recent changes that matter
+
+### Major architecture changes
+
+- migrated prompt-heavy behavior out of `src/utils/agents.ts`
+- added shared skill loader and exemplar services
+- weekly planner moved to skill-backed workflows
+- bespoke mode moved to `executeSkill()`
+- metrics route moved to `metrics` skill
+- internal narrative route moved to `internal-narrative`
+- direct generation no longer imports prompt authority from `agents.ts`
+
+### Sync / data changes
+
+- added dedicated top-nav buttons for pushing research and reconciling sheet edits
+- fixed reconcile auth loopback bug
+- formalized `immutable_facts` as the curated sheet/tab for Immutable-specific facts
+
+### Quality / grounding changes
+
+- internal-only mode now uses `direct-draft-internal`
+- OpenAI direct generation respects `dataSource = "internal"` and skips web search there
+- retrieval now prefers current immutable facts in some overlapping families
+- drafting rules now forbid moving a time qualifier from one fact to another
+
+### UI changes
+
+- weekly planner now includes a bulk draft-mode control
+
+## Outstanding TODOs
+
+### High-priority / likely next asks
+
+1. Improve immutable fact conflict handling beyond the current heuristics.
+   The current supersession logic covers some overlapping families like audience scale and game count, but it is still heuristic-based. If the fact sheet gets richer, a more explicit canonicalization strategy may be needed.
+
+2. Make `immutable_facts` taxonomy more deliberate.
+   Retrieval works better now, but user-entered `category` values still matter. If rows use generic categories like `Users`, retrieval is less semantically clean than rows tagged with product/topic categories like `Immutable Play`, `Passport`, `Audience`, etc.
+
+3. Consider slimming the `immutable_facts` sheet schema if the user asks.
+   The user has already questioned whether all current columns are necessary.
+
+4. Eventually remove `src/utils/agents.ts`.
+   Only do this once every remaining compatibility dependency is gone.
+
+5. OpenAI runtime verification remains environment-dependent.
+   The code path was fixed, but on this machine OpenAI testing has previously been blocked by missing local API env vars.
+
+### Lower-priority cleanup
+
+6. Improve diagnostic visibility for internal fact selection.
+   Right now, if a stale fact slips through, it requires code inspection rather than a transparent “facts used / fact source” UI.
+
+7. Consider a stronger canonical fact model.
+   Today `DataPoints` is still flat claims. If contradictions become common, a more structured fact schema could reduce ambiguity.
+
+8. Generated file churn.
+   `next-env.d.ts` can change due to local Next dev behavior. This is harmless but noisy.
+
+### Explicitly deferred by user
+
+9. Ending-style schema / Google Sheet tagging for closer types.
+   User said they would add the taxonomy/content themselves later. If resumed:
+   - keep the tags user-managed in Sheets / DB
+   - wire behavior via skills, not `src/utils/agents.ts`
+
+## Gotchas / rules
+
+- Do not add new prompt logic to `src/utils/agents.ts`.
+- Do not regress hook outputs from typed objects back to plain strings.
+- Do not rename the physical DB `content_topic` column unless explicitly asked.
+- Do not assume Google Sheets edits are live until they are pulled into DB.
+- Internal-only mode is DB-backed, not sheet-backed directly.
+- The app is auth-protected by middleware. HTML/login-page responses can appear if auth is broken.
+- When asked for “latest”, verify with current data/web if the path relies on live information.
+- The user prefers concise answers, honest corrections, and source-level fixes rather than cosmetic cleanups.
+- The user now expects coherent completed changes to be committed and pushed by default.
+
+## Recommended files to read first
+
+1. `src/harness/loop.ts`
+2. `src/harness/execute.ts`
+3. `src/harness/postprocess.ts`
+4. `src/harness/tools.ts`
+5. `src/lib/dataPoints.ts`
+6. `src/workflows/researchPipeline.ts`
+7. `src/workflows/tweetDrafting.ts`
+8. `src/workflows/weeklyPlanner.ts`
+9. `src/app/api/research-pipeline/route.ts`
+10. `src/app/api/weekly-planner/route.ts`
+11. `src/app/api/generate-tweets/route.ts`
+12. `src/lib/sheetSync.ts`
+13. `src/components/TweetGenerator.tsx`
+14. `src/components/WeeklyPlanner.tsx`
+15. `skills/_context/tweet-voice.md`
+
+## Environment
+
+Expected env keys include:
+
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `DATABASE_URL` (pooled Supabase Postgres)
+- `DATABASE_URL`
 - `DATABASE_URL_UNPOOLED`
 - `ANTHROPIC_API_KEY`
 - `GOOGLE_SHEETS_CLIENT_EMAIL`
 - `GOOGLE_SHEETS_PRIVATE_KEY`
 - `GOOGLE_SHEETS_SPREADSHEET_ID`
+- OpenAI key if testing OpenAI path:
+  - `OPEN_AI_API_SECRET` or `OPENAI_API_KEY`
 
 Notes:
-- `GOOGLE_SHEETS_PRIVATE_KEY` must be a single quoted line with escaped `\n`
-- after changing `.env`, you must fully restart `npm run dev`
-- Supabase auth URL config for local use should point to:
-  - Site URL: `http://localhost:3000`
-  - Redirect URL: `http://localhost:3000/auth/callback`
 
-## 7. Read these files first (in order)
-
-1. `src/harness/loop.ts` — 130 lines, the whole harness
-2. `skills/belief.md` — simplest skill, gets you the file format
-3. `skills/narrative.md` — the citation-index pattern (most interesting design choice)
-4. `src/harness/postprocess.ts` — narrative citation resolution + grounding warnings
-5. `src/harness/execute.ts` — shared deterministic runner used by CLI and workflow adapter
-6. `src/workflows/researchPipeline.ts` — the key adapter that powers the staged research route
-7. `bin/ge.ts` and `bin/ge-chain.ts` — single-skill + full-chain CLI entrypoints
-8. `src/harness/tools.ts` — the three tools; note `queryDataPoints` ranking (verified > manual > agent)
-9. `skills/_context/tweet-voice.md` — voice rules. Banned constructions list is exhaustive; the "Not X, but Y" family is the most-violated.
-10. `src/utils/agents.ts` — **don't read fully; it's large transitional reference material.** Look up specific agent functions as needed.
-11. `src/app/api/sync/pull/route.ts` — exemplar sheet source-of-truth sync logic
-12. `src/lib/googleSheets.ts` — Google auth + pull/writeback helpers
-13. `src/utils/tweetConfig.ts` — archetypes, hook taxonomy, and style definitions
-
-## 8. Conversation context you don't have
-
-What happened in the originating chat (condensed, so you don't repeat mistakes):
-
-- **Early:** ported stages 1–5 one at a time. Each confirmed working before moving on.
-- **Mid-grounding crisis:** I wrongly accused the narrative skill of hallucinating specific figures (e.g. "1,070,452", "$1M in rewards"). On closer inspection, those exact strings were *verbatim* in the research findings — I'd compared against a stale mental model of the research. **Lesson for you: before flagging a hallucination, `cat` the actual input file. Don't trust memory of what was there.**
-- **Real tightening:** after the false alarm, we did legitimately tighten the narrative output to the citation-index schema. The model was occasionally embellishing, and the schema change makes fabrication physically impossible. User picked this "option A" approach explicitly over reverting.
-- **Stage 6 critic** caught a real semantic issue (draft comparing Day-7 GoG retention to Day-1 industry baseline — apples/oranges) but did not catch em-dash / "not X, it's Y" voice violations in its own rewrite. User acknowledged; deferred the programmatic fix.
-- **This session changed the content model meaningfully:**
-  - User wants the **Google Sheet to be the source of truth** for exemplar tweets
-  - User explicitly did **not** want to restore `subtopic`
-  - User explicitly did **not** want to keep `isThread`
-  - User renamed `content_topic` to **Archetype** everywhere user-facing
-  - User changed the hook taxonomy to the 5 types listed above
-- **A real sync bug happened and was fixed:** `pullExemplarTweets` originally used a long Prisma interactive transaction and blew up with `Transaction not found`; it was rewritten to use ordinary Prisma operations instead.
-- **Successful exemplar pull response from this session:** `{"ok":true,"data_points":{"created":0,"updated":28,"skipped":0},"exemplar_tweets":{"created":8,"updated":39,"deleted":16,"skipped":68,"ids_backfilled":8}}`
-  - this is a good known-working reference for what success looks like
-- **This session finished the main research rebuild integration:**
-  - extracted shared deterministic post-processing into `src/harness/postprocess.ts`
-  - added `src/harness/execute.ts` as the shared `runSkill + parse + post-process` path
-  - added `src/workflows/researchPipeline.ts` as the app-layer workflow adapter
-  - rewired `/api/research-pipeline` to the new workflow
-  - added `bin/ge-chain.ts`
-  - verified `npm run build`, `npm run ge -- belief ...`, and `npm run ge:chain -- --topic="Immutable Play user acquisition"`
-- **A real prompt-quality issue still surfaced after the integration.**
-  - `ge:chain` succeeded, but the warning system correctly flagged `1M+` as ungrounded because the source said `1 million`.
-  - This is a prompt/normalization follow-up, not an architecture failure.
-- **User preferences observed:**
-  - Terse responses. Don't narrate deliberation.
-  - Validates judgment calls with short confirmations ("yes do this", "one more", "option a"). Don't over-ask.
-  - Wants to be told honestly when the prior answer was wrong. I corrected myself mid-conversation on the hallucination claim and it was well-received.
-  - Explicit about wanting to fix things at the source (skills) rather than hack around them (critic cleanup). "Rather than the drafting agent just cleaning this up, can we not update the skills for hook + narrative to make sure they don't hallucinate?" — the ethos.
-
-## 9. Next steps — pick one
-
-The user will likely tell you which they want. Options roughly in priority order:
-
-1. **Build `bin/ge-chain.ts`** — a ~20 line helper that runs all 6 stages in sequence, extracts JSON between them, writes final tweets. Eliminates 60 seconds of per-run friction for CLI testing. Low-risk, high-value.
-2. **Tighten the prompt / normalization around grounded shorthand** — the live chain is working, but `1 million` → `1M+` is still slipping through and getting flagged by the warning system.
-3. **Port true deeper research to skills** — current `deepen` just re-runs `research`; if deeper iteration quality matters, build a real `deeper-research` skill instead of assuming parity with the old bespoke agent.
-4. **Programmatic voice check** — regex in the shared deterministic runner for em-dashes, hyphens, banned constructions ("Not X, but Y", "It's not X. It's Y") in hook and draft-tweet output. Warning-level to match existing pattern.
-5. **Improve sheet-sync ergonomics** — likely highest non-architecture UX win:
-   - better skip diagnostics for `/api/sync/pull`
-   - optional admin sync button/page instead of hitting raw API URLs
-   - maybe add `*.tsbuildinfo` to `.gitignore`
-6. **Port weekly-planner agents to skills** — 4 skills: `weekly-synthesis`, `weekly-slot-plan`, `weekly-slot-draft`, `weekly-bulk-draft`. Only do this if user asks; they haven't signalled it.
-7. **Port `runMetricResearchAgent`** — for "single" mode in UI. Same caveat as above.
-8. **Tear out `src/utils/agents.ts`** — only once the remaining UI/API surfaces are fully rewired. Big cleanup moment. **Do not do this prematurely** — the app still has safety-net dependencies on it.
-
-## 10. Rules of the road
-
-- Never create new markdown/docs files unless explicitly asked. (This HANDOVER.md was explicitly requested.)
-- Default to no comments in code. Only comment non-obvious *why*.
-- Never amend git commits; always create a new one.
-- Never run `git push --force` or destructive git without explicit permission.
-- Don't delete `src/utils/agents.ts`, the old API routes, or the old `growth-engine` repo without explicit permission. They are safety nets.
-- Don't "fix" the model ID to 4-5. It's intentionally 4-6.
-- Don't add error handling for scenarios that can't happen. Trust the harness.
-- User prefers one bundled commit when the changes are coherent, not many small ones.
-- Do not commit real secrets from `.env`. The user once pasted the real Google private key into chat while debugging; advise rotating if it happens again.
-
-Good luck.
+- after env changes, restart dev server
+- Google private key must be newline-escaped in env
+- local Supabase auth settings must point to localhost for local OAuth to work
