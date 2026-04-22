@@ -53,6 +53,21 @@ export interface WeeklySlotDraft {
   alternateDraft: string;
 }
 
+export type WeeklyDraftKey = "primaryDraft" | "alternateDraft";
+
+export interface WeeklyFactPackItem {
+  claim: string;
+  sourceUrl: string;
+  sourceType?: string;
+}
+
+export interface WeeklyPairDraftResult {
+  primaryDraft: string;
+  alternateDraft: string;
+  factsUsed: string[];
+  rationale: string;
+}
+
 export const WEEKLY_ARCHETYPE_OPTIONS = weeklyArchetypeOptions;
 
 export const WEEKLY_AUDIENCE_OPTIONS: { value: AudienceLens; label: string }[] = [

@@ -5,6 +5,11 @@ export type ExemplarSets = {
   archetypeExemplars: string;
 };
 
+type ExemplarLimitOptions = {
+  formLimit?: number;
+  archetypeLimit?: number;
+};
+
 export const dbStyleMapping: Record<string, string> = {
   multiparagraph: "Multiple paras",
   bigpara: "Big para",
@@ -34,11 +39,19 @@ function formatExemplarRows(rows: ExemplarRow[]): string {
     .join("\n\n");
 }
 
+function clampExemplarLimit(value: number | undefined, fallback: number) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(1, Math.min(10, Math.round(value!)));
+}
+
 export async function getExemplarsForStyle(
   tweetStyle: string,
-  archetype?: string
+  archetype?: string,
+  limits: ExemplarLimitOptions = {}
 ): Promise<ExemplarSets> {
   const dbStyle = dbStyleMapping[tweetStyle] || dbStyleMapping.oneliner;
+  const formLimit = clampExemplarLimit(limits.formLimit, 5);
+  const archetypeLimit = clampExemplarLimit(limits.archetypeLimit, 5);
 
   const formTweets = await prisma.exemplarTweets.findMany({
     select: {
@@ -47,7 +60,7 @@ export async function getExemplarsForStyle(
       hook_value: true,
     },
     where: { tweet_style: dbStyle, archived: false },
-    take: 5,
+    take: formLimit,
   });
 
   if (!archetype) {
@@ -64,7 +77,7 @@ export async function getExemplarsForStyle(
       hook_value: true,
     },
     where: { archetype, archived: false },
-    take: 5,
+    take: archetypeLimit,
   });
 
   return {
@@ -75,20 +88,22 @@ export async function getExemplarsForStyle(
 
 export async function getHookExemplars(
   hookType: string,
-  archetype?: string
+  archetype?: string,
+  limit = 5
 ): Promise<string> {
+  const take = clampExemplarLimit(limit, 5);
   let hookTweets: ExemplarRow[] = [];
 
   if (archetype) {
     hookTweets = await prisma.exemplarTweets.findMany({
       select: { tweet_text: true, archetype: true, hook_value: true },
       where: { hook_value: hookType, archetype, archived: false },
-      take: 5,
+      take,
     });
   }
 
-  if (hookTweets.length < 5) {
-    const remaining = 5 - hookTweets.length;
+  if (hookTweets.length < take) {
+    const remaining = take - hookTweets.length;
     const extra = await prisma.exemplarTweets.findMany({
       select: { tweet_text: true, archetype: true, hook_value: true },
       where: {

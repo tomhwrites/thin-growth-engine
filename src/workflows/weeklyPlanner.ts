@@ -1,17 +1,16 @@
 import { executeSkill } from "@/harness/execute";
 import { getRelevantDataPoints } from "@/lib/dataPoints";
 import { withAliases } from "@/lib/skillArgs";
-import { runHookedDraftStage } from "@/workflows/tweetDrafting";
 import type {
-  HookOutput,
   NarrativeOutput,
   ResearchResult,
-  SupportingDatum,
 } from "@/types/researchPipeline";
 import {
   ARCHETYPE_DEFAULTS,
   buildDefaultWeeklyPlanSlots,
   type AudienceLens,
+  type WeeklyFactPackItem,
+  type WeeklyPairDraftResult,
   type WeeklyInput,
   type WeeklyNarrative,
   type WeeklyPlanSlot,
@@ -21,11 +20,17 @@ import {
   WEEKLY_ARCHETYPE_OPTIONS,
   WEEKLY_SLOT_COUNT,
 } from "@/types/weeklyPlanning";
+import { runWeeklyPairDraftStage } from "@/workflows/weeklyPairDrafting";
 import type { Archetype } from "@/utils/tweetConfig";
 
 type MetricsSkillOutput = {
   metrics: string[];
   overarchingNarrative: string;
+};
+
+type WeeklyFactCandidate = WeeklyFactPackItem & {
+  priority: number;
+  updatedAt?: Date | null;
 };
 
 function clampTweetOpportunityCount(value: unknown): number {
@@ -132,17 +137,6 @@ function dedupeLines(items: string[]) {
   return items.filter((item, index, array) => array.indexOf(item) === index);
 }
 
-function toSupportingDatum(claim: string): SupportingDatum {
-  return { claim, sourceUrl: "" };
-}
-
-function dedupeSupportingData(items: SupportingDatum[]): SupportingDatum[] {
-  return items.filter(
-    (item, index, array) =>
-      array.findIndex((candidate) => candidate.claim === item.claim) === index
-  );
-}
-
 function findMatchingNarrative(
   synthesis: WeeklySynthesis,
   slot: WeeklyPlanSlot
@@ -169,63 +163,260 @@ function getWeeklySlotEffectiveTopic(slot: WeeklyPlanSlot): string {
   return slot.topic.trim() || slot.scheduleLabel.trim() || slot.archetype;
 }
 
-function buildWeeklySlotSupportingData(
-  synthesis: WeeklySynthesis,
-  slot: WeeklyPlanSlot,
-  matchingNarrative?: WeeklyNarrative,
-  extraData: string[] = []
-) {
-  return dedupeLines(
-    [
-      slot.evidence,
-      slot.additionalContext,
-      ...(matchingNarrative?.proofPoints || []),
-      ...synthesis.evidenceBank,
-      ...extraData,
-    ]
-      .map((item) => item.trim())
-      .filter(Boolean)
-  );
+function extractContextClaims(input: string): string[] {
+  const trimmed = input.trim();
+  if (!trimmed) return [];
+
+  const lines = trimmed
+    .split("\n")
+    .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").trim())
+    .filter(Boolean);
+
+  return lines.length > 0 ? lines : [trimmed];
 }
 
-function buildMergedNarrative(
-  slot: WeeklyPlanSlot,
+function buildWeeklySupplementalFacts(
   synthesis: WeeklySynthesis,
+  slot: WeeklyPlanSlot,
+  matchingNarrative?: WeeklyNarrative
+) {
+  return dedupeLines([
+    ...extractContextClaims(slot.evidence),
+    ...extractContextClaims(slot.additionalContext),
+    ...(matchingNarrative?.proofPoints || []).map((item) => item.trim()).filter(Boolean),
+    ...synthesis.evidenceBank.map((item) => item.trim()).filter(Boolean),
+  ]);
+}
+
+function buildWeeklyNarrativeFrame(
+  slot: WeeklyPlanSlot,
   baseNarrative: NarrativeOutput,
-  matchingNarrative?: WeeklyNarrative,
-  extraData: string[] = []
-): NarrativeOutput {
-  const supplemental = buildWeeklySlotSupportingData(
-    synthesis,
-    slot,
-    matchingNarrative,
-    extraData
-  ).map(toSupportingDatum);
-
-  return {
-    insight:
-      [slot.goal, baseNarrative.insight, matchingNarrative?.claim]
-        .filter(Boolean)
-        .join(" ")
-        .trim() || getWeeklySlotEffectiveTopic(slot),
-    angle: baseNarrative.angle,
-    supportingData: dedupeSupportingData([
-      ...baseNarrative.supportingData,
-      ...supplemental,
-    ]).slice(0, 6),
-  };
+  matchingNarrative?: WeeklyNarrative
+) {
+  return (
+    [slot.goal, baseNarrative.insight, matchingNarrative?.claim]
+      .filter(Boolean)
+      .join(" ")
+      .trim() || getWeeklySlotEffectiveTopic(slot)
+  );
 }
 
-async function runHookStage(
-  topic: string,
-  narrative: NarrativeOutput,
-  archetype?: string
+function getFactCandidateSourceRank(sourceType?: string) {
+  switch ((sourceType || "").toLowerCase()) {
+    case "immutable":
+      return 0;
+    case "cited":
+      return 1;
+    case "verified":
+    case "manual":
+    case "internal":
+    case "metric":
+    case "research":
+      return 2;
+    case "slot_evidence":
+    case "proof_point":
+      return 3;
+    case "synthesis":
+      return 4;
+    default:
+      return 5;
+  }
+}
+
+function normalizeCandidateClaim(claim: string) {
+  return claim.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function extractClaimMagnitude(claim: string): number | null {
+  const match = claim.match(/(\d+(?:\.\d+)?)\s*(billion|million|m|b)?/i);
+  if (!match) return null;
+
+  const value = Number.parseFloat(match[1]);
+  if (!Number.isFinite(value)) return null;
+
+  const unit = (match[2] || "").toLowerCase();
+  if (unit === "billion" || unit === "b") return value * 1_000_000_000;
+  if (unit === "million" || unit === "m") return value * 1_000_000;
+  return value;
+}
+
+function getSupersessionFamily(claim: string): string | null {
+  const normalized = claim.toLowerCase();
+
+  if (
+    /\b(registered users?|wallets?|wallet|connected|onboarded)\b/.test(
+      normalized
+    ) &&
+    /\d/.test(normalized)
+  ) {
+    return "audience_scale";
+  }
+
+  if (
+    /\b(games?|titles?)\b/.test(normalized) &&
+    /\b(total|signed|onboarded|integrated|connected)\b/.test(normalized) &&
+    /\d/.test(normalized)
+  ) {
+    return "game_count";
+  }
+
+  return null;
+}
+
+function getClaimSpecificityScore(claim: string, family: string) {
+  const normalized = claim.toLowerCase();
+
+  if (family === "audience_scale") {
+    if (/\bregistered users?\b/.test(normalized)) return 3;
+    if (/\bwallets?\b/.test(normalized)) return 2;
+    if (/\bconnected|onboarded\b/.test(normalized)) return 1;
+  }
+
+  if (family === "game_count") {
+    if (/\btotal\b/.test(normalized)) return 3;
+    if (/\bsigned\b/.test(normalized)) return 2;
+    if (/\bonboarded|connected|integrated\b/.test(normalized)) return 1;
+  }
+
+  return 0;
+}
+
+function pickPreferredFactCandidate(
+  current: WeeklyFactCandidate,
+  candidate: WeeklyFactCandidate,
+  family: string
 ) {
-  const result = await executeSkill<HookOutput>(
-    "hook",
-    withAliases({ topic, narrative, archetype, contentTopic: archetype })
-  );
-  return { hooks: result.output, warnings: result.warnings };
+  const currentImmutable = current.sourceType === "immutable";
+  const candidateImmutable = candidate.sourceType === "immutable";
+  if (currentImmutable !== candidateImmutable) {
+    return candidateImmutable ? candidate : current;
+  }
+
+  const currentMagnitude = extractClaimMagnitude(current.claim);
+  const candidateMagnitude = extractClaimMagnitude(candidate.claim);
+  if (
+    currentMagnitude !== null &&
+    candidateMagnitude !== null &&
+    currentMagnitude !== candidateMagnitude
+  ) {
+    return candidateMagnitude > currentMagnitude ? candidate : current;
+  }
+
+  const currentSpecificity = getClaimSpecificityScore(current.claim, family);
+  const candidateSpecificity = getClaimSpecificityScore(candidate.claim, family);
+  if (candidateSpecificity !== currentSpecificity) {
+    return candidateSpecificity > currentSpecificity ? candidate : current;
+  }
+
+  if (candidate.priority !== current.priority) {
+    return candidate.priority < current.priority ? candidate : current;
+  }
+
+  const currentUpdatedAt = current.updatedAt?.getTime() ?? 0;
+  const candidateUpdatedAt = candidate.updatedAt?.getTime() ?? 0;
+  return candidateUpdatedAt > currentUpdatedAt ? candidate : current;
+}
+
+function suppressSupersededFactCandidates(candidates: WeeklyFactCandidate[]) {
+  const preferredByFamily = new Map<string, WeeklyFactCandidate>();
+
+  for (const candidate of candidates) {
+    const family = getSupersessionFamily(candidate.claim);
+    if (!family) continue;
+
+    const current = preferredByFamily.get(family);
+    preferredByFamily.set(
+      family,
+      current ? pickPreferredFactCandidate(current, candidate, family) : candidate
+    );
+  }
+
+  return candidates.filter((candidate) => {
+    const family = getSupersessionFamily(candidate.claim);
+    if (!family) return true;
+    return preferredByFamily.get(family) === candidate;
+  });
+}
+
+function makeFactCandidates(
+  claims: Array<{
+    claim: string;
+    sourceUrl?: string;
+    sourceType?: string;
+    priority: number;
+    updatedAt?: Date | null;
+  }>
+) {
+  return claims
+    .map((claim) => ({
+      claim: claim.claim.trim(),
+      sourceUrl: claim.sourceUrl?.trim() || "",
+      sourceType: claim.sourceType?.trim() || "",
+      priority: claim.priority,
+      updatedAt: claim.updatedAt ?? null,
+    }))
+    .filter((claim) => claim.claim.length > 0);
+}
+
+function buildWeeklyFactPack(
+  candidates: WeeklyFactCandidate[]
+): WeeklyFactPackItem[] {
+  const dedupedByClaim = new Map<string, WeeklyFactCandidate>();
+
+  for (const candidate of candidates) {
+    const key = normalizeCandidateClaim(candidate.claim);
+    const current = dedupedByClaim.get(key);
+    if (!current) {
+      dedupedByClaim.set(key, candidate);
+      continue;
+    }
+
+    const preferred =
+      current.priority === candidate.priority
+        ? getFactCandidateSourceRank(current.sourceType) <=
+          getFactCandidateSourceRank(candidate.sourceType)
+          ? current
+          : candidate
+        : current.priority < candidate.priority
+          ? current
+          : candidate;
+    dedupedByClaim.set(key, preferred);
+  }
+
+  return suppressSupersededFactCandidates(Array.from(dedupedByClaim.values()))
+    .sort((a, b) => {
+      if (a.priority !== b.priority) return a.priority - b.priority;
+      const sourceRankDelta =
+        getFactCandidateSourceRank(a.sourceType) -
+        getFactCandidateSourceRank(b.sourceType);
+      if (sourceRankDelta !== 0) return sourceRankDelta;
+      const aUpdatedAt = a.updatedAt?.getTime() ?? 0;
+      const bUpdatedAt = b.updatedAt?.getTime() ?? 0;
+      return bUpdatedAt - aUpdatedAt;
+    })
+    .slice(0, 5)
+    .map((candidate) => ({
+      claim: candidate.claim,
+      sourceUrl: candidate.sourceUrl,
+      sourceType: candidate.sourceType || undefined,
+    }));
+}
+
+async function runWeeklyPairDraft(
+  slot: WeeklyPlanSlot,
+  topic: string,
+  narrativeFrame: string,
+  factPack: WeeklyFactPackItem[]
+): Promise<WeeklyPairDraftResult> {
+  return runWeeklyPairDraftStage({
+    topic,
+    archetype: slot.archetype,
+    tweetStyle: slot.tweetStyle,
+    goal: slot.goal,
+    factPack,
+    additionalContext: slot.additionalContext,
+    narrativeFrame,
+  });
 }
 
 async function runWeeklyResearchDraft(
@@ -260,25 +451,34 @@ async function runWeeklyResearchDraft(
     "narrative",
     withAliases({ topic: effectiveTopic, research: research.output.research })
   );
-  const mergedNarrative = buildMergedNarrative(
+  const factPack = buildWeeklyFactPack([
+    ...makeFactCandidates(
+      narrative.output.supportingData.map((item) => ({
+        claim: item.claim,
+        sourceUrl: item.sourceUrl,
+        sourceType: "cited",
+        priority: 0,
+      }))
+    ),
+    ...makeFactCandidates(
+      buildWeeklySupplementalFacts(synthesis, slot, matchingNarrative).map((claim) => ({
+        claim,
+        sourceType: "slot_evidence",
+        priority: 2,
+      }))
+    ),
+  ]);
+  const draft = await runWeeklyPairDraft(
     slot,
-    synthesis,
-    narrative.output,
-    matchingNarrative
-  );
-  const hook = await runHookStage(effectiveTopic, mergedNarrative, slot.archetype);
-  const draft = await runHookedDraftStage(
     effectiveTopic,
-    mergedNarrative,
-    hook.hooks,
-    slot.tweetStyle,
-    slot.archetype
+    buildWeeklyNarrativeFrame(slot, narrative.output, matchingNarrative),
+    factPack
   );
 
   return {
     slotId: slot.id,
-    primaryDraft: draft.tweets[0] || "",
-    alternateDraft: draft.tweets[1] || draft.tweets[0] || "",
+    primaryDraft: draft.primaryDraft || "",
+    alternateDraft: draft.alternateDraft || draft.primaryDraft || "",
   };
 }
 
@@ -324,25 +524,35 @@ async function runWeeklyInternalDraft(
           supportingData: [],
         };
 
-  const mergedNarrative = buildMergedNarrative(
+  const factPack = buildWeeklyFactPack([
+    ...makeFactCandidates(
+      dataPoints.map((dataPoint) => ({
+        claim: dataPoint.claim,
+        sourceUrl: dataPoint.sourceUrl,
+        sourceType: dataPoint.sourceType,
+        priority: dataPoint.sourceType === "immutable" ? 0 : 1,
+        updatedAt: dataPoint.updatedAt ?? null,
+      }))
+    ),
+    ...makeFactCandidates(
+      buildWeeklySupplementalFacts(synthesis, slot, matchingNarrative).map((claim) => ({
+        claim,
+        sourceType: "slot_evidence",
+        priority: 2,
+      }))
+    ),
+  ]);
+  const draft = await runWeeklyPairDraft(
     slot,
-    synthesis,
-    baseNarrative,
-    matchingNarrative
-  );
-  const hook = await runHookStage(effectiveTopic, mergedNarrative, slot.archetype);
-  const draft = await runHookedDraftStage(
     effectiveTopic,
-    mergedNarrative,
-    hook.hooks,
-    slot.tweetStyle,
-    slot.archetype
+    buildWeeklyNarrativeFrame(slot, baseNarrative, matchingNarrative),
+    factPack
   );
 
   return {
     slotId: slot.id,
-    primaryDraft: draft.tweets[0] || "",
-    alternateDraft: draft.tweets[1] || draft.tweets[0] || "",
+    primaryDraft: draft.primaryDraft || "",
+    alternateDraft: draft.alternateDraft || draft.primaryDraft || "",
   };
 }
 
@@ -366,29 +576,38 @@ async function runWeeklyQuickDraft(
         .join(" ")
         .trim() || effectiveTopic,
     angle: "",
-    supportingData: metrics.output.metrics.map(toSupportingDatum),
+    supportingData: metrics.output.metrics.map((claim) => ({
+      claim,
+      sourceUrl: "",
+    })),
   };
-
-  const mergedNarrative = buildMergedNarrative(
+  const factPack = buildWeeklyFactPack([
+    ...makeFactCandidates(
+      metrics.output.metrics.map((claim) => ({
+        claim,
+        sourceType: "metric",
+        priority: 1,
+      }))
+    ),
+    ...makeFactCandidates(
+      buildWeeklySupplementalFacts(synthesis, slot, matchingNarrative).map((claim) => ({
+        claim,
+        sourceType: "slot_evidence",
+        priority: 2,
+      }))
+    ),
+  ]);
+  const draft = await runWeeklyPairDraft(
     slot,
-    synthesis,
-    baseNarrative,
-    matchingNarrative,
-    metrics.output.metrics
-  );
-  const hook = await runHookStage(effectiveTopic, mergedNarrative, slot.archetype);
-  const draft = await runHookedDraftStage(
     effectiveTopic,
-    mergedNarrative,
-    hook.hooks,
-    slot.tweetStyle,
-    slot.archetype
+    buildWeeklyNarrativeFrame(slot, baseNarrative, matchingNarrative),
+    factPack
   );
 
   return {
     slotId: slot.id,
-    primaryDraft: draft.tweets[0] || "",
-    alternateDraft: draft.tweets[1] || draft.tweets[0] || "",
+    primaryDraft: draft.primaryDraft || "",
+    alternateDraft: draft.alternateDraft || draft.primaryDraft || "",
   };
 }
 

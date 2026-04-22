@@ -33,19 +33,44 @@ const tools: Record<string, ToolDef> = {
           description:
             "One of: Thesis statement | Curiosity Gap | Short | Long | Data. When set, returns hookExemplars filtered to that hook type.",
         },
+        formLimit: {
+          type: "number",
+          description: "Optional cap for form exemplars. Defaults to 5.",
+        },
+        archetypeLimit: {
+          type: "number",
+          description: "Optional cap for archetype exemplars. Defaults to 5.",
+        },
+        hookLimit: {
+          type: "number",
+          description: "Optional cap for hook exemplars. Defaults to 5.",
+        },
       },
     },
     run: async (input) => {
       const style = input.style ? String(input.style) : undefined;
       const topic = input.topic ? String(input.topic) : undefined;
       const hookType = input.hookType ? String(input.hookType) : undefined;
+      const formLimit =
+        typeof input.formLimit === "number" ? input.formLimit : undefined;
+      const archetypeLimit =
+        typeof input.archetypeLimit === "number"
+          ? input.archetypeLimit
+          : undefined;
+      const hookLimit =
+        typeof input.hookLimit === "number" ? input.hookLimit : undefined;
       const out: Record<string, string> = {};
       if (style) {
-        const exemplars = await getExemplarsForStyle(style, topic);
+        const exemplars = await getExemplarsForStyle(style, topic, {
+          formLimit,
+          archetypeLimit,
+        });
         out.formExemplars = exemplars.formExemplars;
         if (topic) out.archetypeExemplars = exemplars.archetypeExemplars;
       }
-      if (hookType) out.hookExemplars = await getHookExemplars(hookType, topic);
+      if (hookType) {
+        out.hookExemplars = await getHookExemplars(hookType, topic, hookLimit);
+      }
       return JSON.stringify(out);
     },
   },
