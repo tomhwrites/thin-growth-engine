@@ -1,11 +1,13 @@
 // app/api/generate-tweets/route.ts
 import { NextResponse } from "next/server";
 import { executeSkill } from "@/harness/execute";
+import { buildFactPack, makeFactCandidates } from "@/lib/factPack";
 import { withAliases } from "@/lib/skillArgs";
 import {
   generateTweetsFromOpenAI,
   GenerateTweetsRequest,
 } from "@/utils/generateFromOpenAI";
+import { runDirectFactPackDraftStage } from "@/workflows/directFactPackDrafting";
 import { tweetStyles } from "@/utils/tweetConfig";
 
 export async function POST(request: Request) {
@@ -44,6 +46,36 @@ export async function POST(request: Request) {
     const selectedStyle =
       tweetStyles[requestData.tweetStyle as keyof typeof tweetStyles] ||
       tweetStyles.catchphrase;
+
+    if (
+      requestData.dataSource === "internal" ||
+      requestData.dataSource === "quick"
+    ) {
+      const factPack =
+        requestData.factPack && requestData.factPack.length > 0
+          ? requestData.factPack
+          : buildFactPack(
+              makeFactCandidates(
+                requestData.selectedMetrics.map((claim) => ({
+                  claim,
+                  sourceType:
+                    requestData.dataSource === "internal" ? "internal" : "metric",
+                  priority: 1,
+                }))
+              )
+            );
+
+      const result = await runDirectFactPackDraftStage({
+        topic: requestData.topic,
+        archetype: requestData.archetype ?? requestData.contentTopic,
+        tweetStyle: requestData.tweetStyle,
+        narrative: requestData.overarchingNarrative || requestData.topic,
+        factPack,
+        dataSource: requestData.dataSource,
+      });
+
+      return NextResponse.json({ tweets: result.tweets });
+    }
 
     const skillName =
       requestData.dataSource === "internal"

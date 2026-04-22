@@ -1,9 +1,11 @@
 import type { ExemplarSets } from "@/lib/exemplars";
+import type { FactPackItem } from "@/types/factPack";
 
 export function buildDirectDraftUserPrompt(input: {
   topic: string;
   narrative: string;
   metrics: string[];
+  factPack?: FactPackItem[];
   styleName: string;
   styleDescription: string;
   archetype?: string;
@@ -21,7 +23,11 @@ export function buildDirectDraftUserPrompt(input: {
     sections.push(`Archetype: ${input.archetype}`);
   }
 
-  if (input.metrics.length > 0) {
+  if (input.factPack && input.factPack.length > 0) {
+    sections.push(
+      `Grounded facts:\n${input.factPack.map((item) => `- ${item.claim}`).join("\n")}`
+    );
+  } else if (input.metrics.length > 0) {
     sections.push(
       `Metrics:\n${input.metrics.map((metric) => `- ${metric}`).join("\n")}`
     );

@@ -3,6 +3,7 @@ import { buildSkillSystemPrompt } from "@/harness/skillLoader";
 import { buildDirectDraftUserPrompt } from "@/lib/directDraftPrompt";
 import { getExemplarsForStyle } from "@/lib/exemplars";
 import { parseDelimitedTweets } from "@/lib/tweetOutput";
+import type { FactPackItem } from "@/types/factPack";
 import { tweetStyles } from "@/utils/tweetConfig";
 
 // Define the types for the tweet generation request
@@ -10,6 +11,7 @@ export type GenerateTweetsRequest = {
   topic: string;
   overarchingNarrative: string;
   selectedMetrics: string[];
+  factPack?: FactPackItem[];
   tweetStyle: string;
   dataSource?: "internal" | "quick" | "deep";
   archetype?: string;
@@ -41,11 +43,12 @@ export async function generateTweetsFromOpenAI(
     customPrompt,
     overarchingNarrative,
     selectedMetrics,
+    factPack,
     dataSource,
     archetype = params.contentTopic,
   } = params;
 
-  console.log("Using OpenAI GPT-4o model with web search");
+  console.log("Using OpenAI direct tweet generation");
 
   // Get the selected style or default to catchphrase
   const selectedStyle =
@@ -68,11 +71,18 @@ export async function generateTweetsFromOpenAI(
 
   try {
     console.log("Fetching shared exemplars for style:", selectedStyle.name);
-    const exemplarTweetsText = await getExemplarsForStyle(tweetStyle, archetype);
+    const exemplarTweetsText = await getExemplarsForStyle(
+      tweetStyle,
+      archetype,
+      factPack?.length ? { formLimit: 3, archetypeLimit: 2 } : {}
+    );
 
     // STEP 1: Gather relevant information via web search
     let researchInfo = "";
-    if (dataSource !== "internal") {
+    const shouldUseWebSearch =
+      dataSource !== "internal" && (!factPack || factPack.length === 0);
+
+    if (shouldUseWebSearch) {
       console.log("Step 1: Gathering relevant information via web search...");
 
       const searchPrompt = `I need to create tweets about ${
@@ -106,6 +116,7 @@ export async function generateTweetsFromOpenAI(
       topic: customPrompt || topic,
       narrative: overarchingNarrative || customPrompt || topic,
       metrics: selectedMetrics,
+      factPack,
       styleName: selectedStyle.name,
       styleDescription: selectedStyle.description,
       archetype,

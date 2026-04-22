@@ -2,7 +2,9 @@
 import { NextResponse } from "next/server";
 import { Metric } from "@/components/TweetGenerator";
 import { executeSkill } from "@/harness/execute";
+import { buildFactPack, makeFactCandidates } from "@/lib/factPack";
 import { withAliases } from "@/lib/skillArgs";
+import type { FactPackItem } from "@/types/factPack";
 
 // Define the expected request body type
 interface FetchMetricsRequest {
@@ -13,6 +15,7 @@ interface FetchMetricsRequest {
 interface FetchMetricsResponse {
   metrics: Metric[];
   overarchingNarrative?: string;
+  factPack: FactPackItem[];
 }
 
 export async function POST(request: Request) {
@@ -24,15 +27,26 @@ export async function POST(request: Request) {
     }>("metrics", withAliases({ topic }));
     const { metrics, overarchingNarrative } = result.output;
 
-    const formattedMetrics: Metric[] = metrics.map((metric, index) => ({
+    const factPack = buildFactPack(
+      makeFactCandidates(
+        metrics.map((claim) => ({
+          claim,
+          sourceType: "metric",
+          priority: 1,
+        }))
+      )
+    );
+
+    const formattedMetrics: Metric[] = factPack.map((metric, index) => ({
       id: index.toString(),
-      name: metric,
+      name: metric.claim,
       selected: false,
     }));
 
     const response: FetchMetricsResponse = {
       metrics: formattedMetrics,
       overarchingNarrative,
+      factPack,
     };
 
     return NextResponse.json(response);

@@ -1,3 +1,4 @@
+import type { FactPackItem } from "@/types/factPack";
 import type { Archetype } from "@/utils/tweetConfig";
 import { weeklyArchetypeOptions } from "@/utils/tweetConfig";
 
@@ -55,11 +56,7 @@ export interface WeeklySlotDraft {
 
 export type WeeklyDraftKey = "primaryDraft" | "alternateDraft";
 
-export interface WeeklyFactPackItem {
-  claim: string;
-  sourceUrl: string;
-  sourceType?: string;
-}
+export type WeeklyFactPackItem = FactPackItem;
 
 export interface WeeklyPairDraftResult {
   primaryDraft: string;
