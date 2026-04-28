@@ -593,31 +593,18 @@ const TweetGenerator = (props: TweetGeneratorProps) => {
 
       {/* Tweet Style Selection */}
       <div>
-        <label className="block text-sm font-medium text-gray-300 mb-3">Tweet Style</label>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <label className="block text-sm font-medium text-gray-300 mb-2">Tweet Style</label>
+        <select
+          value={selectedStyleId}
+          onChange={(event) => setSelectedStyleId(event.target.value)}
+          className="w-full rounded-lg border border-gray-600 bg-white/10 px-3 py-2 text-white outline-none focus:border-purple-500"
+        >
           {tweetStyleOptions.map((style) => (
-            <div
-              key={style.id}
-              onClick={() => setSelectedStyleId(style.id)}
-              className={`p-3 rounded-lg cursor-pointer border transition-all duration-200 ${
-                selectedStyleId === style.id
-                  ? "border-purple-500 bg-purple-900/30 shadow-lg shadow-purple-500/20"
-                  : "border-gray-700 bg-white/5 hover:bg-white/10 hover:border-gray-500"
-              }`}
-            >
-              <div className="flex items-center mb-1">
-                <input
-                  type="radio"
-                  checked={selectedStyleId === style.id}
-                  onChange={() => setSelectedStyleId(style.id)}
-                  className="mr-3 h-4 w-4 accent-purple-500"
-                />
-                <h3 className="text-white font-medium text-sm">{style.name}</h3>
-              </div>
-              <p className="text-gray-400 text-xs ml-7">{style.description}</p>
-            </div>
+            <option key={style.id} value={style.id} className="bg-gray-900">
+              {style.name} — {style.description}
+            </option>
           ))}
-        </div>
+        </select>
       </div>
 
       {/* Error Display */}

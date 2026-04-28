@@ -1,9 +1,14 @@
 import { NextResponse } from "next/server";
 import {
+  getFreshContextRequirement,
+  isWeeklySlotReadyForDraft,
+} from "@/lib/weeklyContextRequirements";
+import {
   runWeeklyBulkDraft,
   runWeeklyPlan,
   runWeeklySlotDraft,
   runWeeklySynthesis,
+  summarizeWeeklyQualityRun,
 } from "@/workflows/weeklyPlanner";
 import type {
   WeeklyInput,
@@ -98,6 +103,14 @@ export async function POST(request: Request) {
           );
         }
 
+        const freshContextError = getFreshContextRequirement(slot);
+        if (freshContextError) {
+          return NextResponse.json(
+            { error: `Slot ${slot.slotNumber}: ${freshContextError}` },
+            { status: 400 }
+          );
+        }
+
         const draft = await runWeeklySlotDraft(body.synthesis, slot);
 
         return NextResponse.json({ draft });
@@ -122,9 +135,26 @@ export async function POST(request: Request) {
           );
         }
 
-        const drafts: WeeklySlotDraft[] = await runWeeklyBulkDraft(body.synthesis, slots);
+        const blockedSlots = slots
+          .filter(isWeeklySlotDraftable)
+          .filter((slot) => !isWeeklySlotReadyForDraft(slot));
+        if (blockedSlots.length > 0) {
+          return NextResponse.json(
+            {
+              error: `Add fresh context before bulk drafting: ${blockedSlots
+                .map((slot) => `slot ${slot.slotNumber} (${slot.archetype})`)
+                .join(", ")}`,
+            },
+            { status: 400 }
+          );
+        }
 
-        return NextResponse.json({ drafts });
+        const drafts: WeeklySlotDraft[] = await runWeeklyBulkDraft(body.synthesis, slots);
+        const qualitySummary = drafts.some((draft) => draft.confidence || draft.failureMode)
+          ? summarizeWeeklyQualityRun(drafts)
+          : undefined;
+
+        return NextResponse.json({ drafts, qualitySummary });
       }
 
       default:

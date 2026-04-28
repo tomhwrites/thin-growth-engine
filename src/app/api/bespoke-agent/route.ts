@@ -99,8 +99,8 @@ function parseEvidenceNeedsInput(inputText: string, topic: string): EvidenceNeed
     .map((block) => block.trim())
     .filter(Boolean);
 
-  const structuredBlocks = blocks
-    .map((block) => {
+  const structuredBlocks: EvidenceNeed[] = blocks
+    .map<EvidenceNeed | null>((block) => {
       const lines = block
         .split("\n")
         .map((line) => line.trim())

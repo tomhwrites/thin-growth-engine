@@ -14,6 +14,22 @@ export function getWeeklyPairRewriteSkill(style?: string) {
     : "weekly-rewrite-pair";
 }
 
+export function getWeeklySlotFrameSkill() {
+  return "weekly-slot-frame";
+}
+
+export function getWeeklySlotCandidateSkill(style?: string) {
+  return isHookBulletsStyle(style)
+    ? "weekly-slot-candidates-hookbullets"
+    : "weekly-slot-candidates";
+}
+
+export function getWeeklySlotCriticSkill(style?: string) {
+  return isHookBulletsStyle(style)
+    ? "weekly-slot-critic-hookbullets"
+    : "weekly-slot-critic";
+}
+
 export function getDirectFactPackDraftSkill(style?: string) {
   return isHookBulletsStyle(style)
     ? "direct-draft-factpack-hookbullets"

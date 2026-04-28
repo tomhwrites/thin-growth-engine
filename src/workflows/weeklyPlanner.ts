@@ -1,4 +1,5 @@
 import { executeSkill } from "@/harness/execute";
+import { mapWithConcurrency, withTimeout } from "@/lib/async";
 import { getRelevantDataPoints } from "@/lib/dataPoints";
 import { buildFactPack, makeFactCandidates } from "@/lib/factPack";
 import { withAliases } from "@/lib/skillArgs";
@@ -14,6 +15,7 @@ import {
   type WeeklyPairDraftResult,
   type WeeklyInput,
   type WeeklyNarrative,
+  type WeeklyQualityRunSummary,
   type WeeklyPlanSlot,
   type WeeklySlotDraft,
   type WeeklySynthesis,
@@ -22,6 +24,7 @@ import {
   WEEKLY_SLOT_COUNT,
 } from "@/types/weeklyPlanning";
 import { runWeeklyPairDraftStage } from "@/workflows/weeklyPairDrafting";
+import { runWeeklyQualityDraft } from "@/workflows/weeklySlotCandidates";
 import type { Archetype } from "@/utils/tweetConfig";
 
 type MetricsSkillOutput = {
@@ -406,6 +409,50 @@ async function runWeeklyQuickDraft(
   };
 }
 
+async function runWeeklyQualitySlotDraft(
+  synthesis: WeeklySynthesis,
+  slot: WeeklyPlanSlot
+): Promise<WeeklySlotDraft> {
+  const matchingNarrative = findMatchingNarrative(synthesis, slot);
+  const effectiveTopic = getWeeklySlotEffectiveTopic(slot);
+  const searchTopic = [effectiveTopic, slot.additionalContext, slot.evidence]
+    .filter(Boolean)
+    .join(". ");
+  const dataPoints = await getRelevantDataPoints(searchTopic, 20, {
+    includeImmutableFallback: true,
+  });
+
+  const factPack = buildFactPack(
+    [
+      ...makeFactCandidates(
+        dataPoints.map((dataPoint) => ({
+          claim: dataPoint.claim,
+          sourceUrl: dataPoint.sourceUrl,
+          sourceType: dataPoint.sourceType,
+          priority: dataPoint.sourceType === "immutable" ? 0 : 1,
+          updatedAt: dataPoint.updatedAt ?? null,
+        }))
+      ),
+      ...makeFactCandidates(
+        buildWeeklySupplementalFacts(synthesis, slot, matchingNarrative).map((claim) => ({
+          claim,
+          sourceType: "slot_evidence",
+          priority: 2,
+        }))
+      ),
+    ],
+    8
+  );
+
+  return runWeeklyQualityDraft({
+    synthesis,
+    slot,
+    topic: effectiveTopic,
+    factPack,
+    matchingNarrative,
+  });
+}
+
 export async function runWeeklySynthesis(
   weeklyInput: WeeklyInput
 ): Promise<WeeklySynthesis> {
@@ -444,6 +491,27 @@ export async function runWeeklySlotDraft(
   synthesis: WeeklySynthesis,
   slot: WeeklyPlanSlot
 ): Promise<WeeklySlotDraft> {
+  if (slot.draftMode === "quality") {
+    return withTimeout(
+      runWeeklyQualitySlotDraft(synthesis, slot),
+      90_000,
+      `Quality drafting timed out for ${slot.id}`
+    ).catch((error: any) => ({
+      slotId: slot.id,
+      primaryDraft: "",
+      alternateDraft: "",
+      selectedCandidateId: null,
+      alternateDrafts: [],
+      candidates: [],
+      scores: [],
+      confidence: "low" as const,
+      failureMode: error?.message?.includes("timed out")
+        ? ("timeout" as const)
+        : ("generation_failed" as const),
+      selectionReason: error?.message || "Quality drafting failed.",
+    }));
+  }
+
   if (slot.draftMode === "internal") {
     return runWeeklyInternalDraft(synthesis, slot);
   }
@@ -461,9 +529,53 @@ export async function runWeeklyBulkDraft(
     Boolean(slot.topic.trim() || slot.scheduleLabel.trim())
   );
 
+  const hasQualitySlots = draftableSlots.some((slot) => slot.draftMode === "quality");
+
+  if (hasQualitySlots) {
+    return mapWithConcurrency(draftableSlots, 2, async (slot) => {
+      if (slot.draftMode === "quality") {
+        return runWeeklySlotDraft(synthesis, slot);
+      }
+      return runWeeklySlotDraft(synthesis, slot);
+    });
+  }
+
   const drafts: WeeklySlotDraft[] = [];
   for (const slot of draftableSlots) {
     drafts.push(await runWeeklySlotDraft(synthesis, slot));
   }
   return drafts;
+}
+
+export function summarizeWeeklyQualityRun(
+  drafts: WeeklySlotDraft[]
+): WeeklyQualityRunSummary {
+  return drafts.reduce<WeeklyQualityRunSummary>(
+    (summary, draft) => {
+      summary.totalSlots += 1;
+      if (draft.failureMode) {
+        summary.failed += 1;
+        if (draft.failureMode === "critic_failed") summary.criticFailures += 1;
+        if (
+          draft.failureMode === "generation_failed" ||
+          draft.failureMode === "candidate_failed" ||
+          draft.failureMode === "frame_failed"
+        ) {
+          summary.generationFailures += 1;
+        }
+      } else {
+        summary.succeeded += 1;
+      }
+      if (draft.confidence === "low") summary.lowConfidence += 1;
+      return summary;
+    },
+    {
+      totalSlots: 0,
+      succeeded: 0,
+      failed: 0,
+      lowConfidence: 0,
+      criticFailures: 0,
+      generationFailures: 0,
+    }
+  );
 }

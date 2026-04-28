@@ -2,6 +2,10 @@
 
 import { useMemo, useState } from "react";
 import { RiAiGenerate } from "react-icons/ri";
+import {
+  getFreshContextRequirement,
+  isWeeklySlotReadyForDraft,
+} from "@/lib/weeklyContextRequirements";
 import { tweetStyles } from "@/utils/tweetConfig";
 import {
   ARCHETYPE_DEFAULTS,
@@ -10,13 +14,14 @@ import {
   type WeeklyInput,
   type WeeklyPlanningMode,
   type WeeklyPlanSlot,
+  type WeeklyQualityRunSummary,
   type WeeklySlotDraft,
   type WeeklySynthesis,
   WEEKLY_ARCHETYPE_OPTIONS,
   WEEKLY_DRAFT_MODE_OPTIONS,
 } from "@/types/weeklyPlanning";
 
-type PlannerRequestStage = "synthesize" | "plan" | "draft_slot";
+type PlannerRequestStage = "synthesize" | "plan" | "draft_slot" | "draft_all";
 type PlannerStage = "plan" | "draft_slot" | "draft_all" | null;
 type ScheduleViewMode = "timeline" | "list";
 type BulkDraftProgress = {
@@ -38,6 +43,91 @@ function getWeeklySlotDraftLabel(slot: WeeklyPlanSlot) {
   return slot.topic.trim() || slot.scheduleLabel.trim() || slot.archetype;
 }
 
+function getConfidenceClasses(confidence?: WeeklySlotDraft["confidence"]) {
+  if (confidence === "high") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-100";
+  if (confidence === "medium") return "border-amber-500/40 bg-amber-500/10 text-amber-100";
+  if (confidence === "low") return "border-red-500/40 bg-red-500/10 text-red-100";
+  return "border-gray-600 bg-white/5 text-gray-300";
+}
+
+function getQualityBadgeLabel(draft: WeeklySlotDraft) {
+  if (draft.failureMode) return draft.failureMode.replaceAll("_", " ");
+  if (draft.confidence) return `${draft.confidence} confidence`;
+  return null;
+}
+
+function getQualityCandidateCards(draft: WeeklySlotDraft) {
+  const seen = new Set<string>();
+  const cards: { id: string; title: string; tweet: string; selected: boolean }[] = [];
+
+  const addCard = (id: string, title: string, tweet: string, selected: boolean) => {
+    const normalized = tweet.trim().toLowerCase().replace(/\s+/g, " ");
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    cards.push({ id, title, tweet, selected });
+  };
+
+  addCard(
+    draft.selectedCandidateId || "primary",
+    draft.selectedCandidateId
+      ? `Best pick · ${draft.selectedCandidateId}`
+      : "Best pick",
+    draft.primaryDraft,
+    true
+  );
+
+  (draft.candidates || []).forEach((candidate) => {
+    if (candidate.validationIssues.length > 0) return;
+    addCard(candidate.id, candidate.id, candidate.tweet, false);
+  });
+
+  (draft.alternateDrafts || []).forEach((tweet, index) => {
+    addCard(`alternate-${index + 1}`, `candidate ${index + 2}`, tweet, false);
+  });
+
+  if (cards.length === 0 && draft.alternateDraft) {
+    addCard("alternate", "Alternate", draft.alternateDraft, false);
+  }
+
+  return cards;
+}
+
+function summarizeQualityDrafts(drafts: WeeklySlotDraft[]): WeeklyQualityRunSummary | null {
+  const qualityDrafts = drafts.filter(
+    (draft) => draft.confidence || draft.failureMode
+  );
+  if (qualityDrafts.length === 0) return null;
+
+  return qualityDrafts.reduce<WeeklyQualityRunSummary>(
+    (summary, draft) => {
+      summary.totalSlots += 1;
+      if (draft.failureMode) {
+        summary.failed += 1;
+        if (draft.failureMode === "critic_failed") summary.criticFailures += 1;
+        if (
+          draft.failureMode === "generation_failed" ||
+          draft.failureMode === "candidate_failed" ||
+          draft.failureMode === "frame_failed"
+        ) {
+          summary.generationFailures += 1;
+        }
+      } else {
+        summary.succeeded += 1;
+      }
+      if (draft.confidence === "low") summary.lowConfidence += 1;
+      return summary;
+    },
+    {
+      totalSlots: 0,
+      succeeded: 0,
+      failed: 0,
+      lowConfidence: 0,
+      criticFailures: 0,
+      generationFailures: 0,
+    }
+  );
+}
+
 function WeeklyPlanner() {
   const [weekOf] = useState(getTodayDateString);
   const [weeklyContextDump, setWeeklyContextDump] = useState("");
@@ -54,6 +144,8 @@ function WeeklyPlanner() {
   const [draftingSlotId, setDraftingSlotId] = useState<string | null>(null);
   const [bulkDraftProgress, setBulkDraftProgress] =
     useState<BulkDraftProgress | null>(null);
+  const [qualitySummary, setQualitySummary] =
+    useState<WeeklyQualityRunSummary | null>(null);
 
   const weeklyInput = useMemo<WeeklyInput>(
     () => ({
@@ -117,6 +209,17 @@ function WeeklyPlanner() {
     [slots]
   );
 
+  const blockedFreshContextSlots = useMemo(
+    () => draftableSlots.filter((slot) => !isWeeklySlotReadyForDraft(slot)),
+    [draftableSlots]
+  );
+
+  const bulkDraftMode = useMemo(() => {
+    const firstMode = slots[0]?.draftMode;
+    if (!firstMode) return null;
+    return slots.every((slot) => slot.draftMode === firstMode) ? firstMode : null;
+  }, [slots]);
+
   const requestWeeklyPlanner = async <T,>(
     stage: PlannerRequestStage,
     payload: Record<string, unknown>
@@ -160,6 +263,7 @@ function WeeklyPlanner() {
       setSlots(buildDefaultBauWeeklyPlanSlots());
       setSynthesis(null);
       setDraftsBySlotId({});
+      setQualitySummary(null);
       setPlannerError(null);
       setScheduleView("timeline");
       setDraftingSlotId(null);
@@ -198,6 +302,7 @@ function WeeklyPlanner() {
         })
       );
       setDraftsBySlotId({});
+      setQualitySummary(null);
       setScheduleView("timeline");
       setDraftingSlotId(null);
       setBulkDraftProgress(null);
@@ -268,6 +373,7 @@ function WeeklyPlanner() {
     setSlots(buildDefaultWeeklyPlanSlots());
     setSynthesis(null);
     setDraftsBySlotId({});
+    setQualitySummary(null);
     setPlannerError(null);
     setScheduleView("timeline");
     setDraftingSlotId(null);
@@ -317,6 +423,11 @@ function WeeklyPlanner() {
   const handleDraftSlot = async (slotId: string) => {
     const slot = slots.find((item) => item.id === slotId);
     if (!slot || !isDraftableWeeklySlot(slot)) return;
+    const contextRequirement = getFreshContextRequirement(slot);
+    if (contextRequirement) {
+      setPlannerError(`Slot ${slot.slotNumber}: ${contextRequirement}.`);
+      return;
+    }
 
     setPlannerStage("draft_slot");
     setDraftingSlotId(slotId);
@@ -336,19 +447,27 @@ function WeeklyPlanner() {
 
   const handleDraftAllSlots = async () => {
     if (draftableSlots.length === 0) return;
+    if (blockedFreshContextSlots.length > 0) {
+      setPlannerError(
+        `Add fresh context before drafting: ${blockedFreshContextSlots
+          .map((slot) => `slot ${slot.slotNumber} (${slot.archetype})`)
+          .join(", ")}.`
+      );
+      return;
+    }
 
     const slotsSnapshot = slots.map((slot) => ({ ...slot }));
-    let activeSlot: WeeklyPlanSlot | null = null;
 
     setPlannerStage("draft_all");
     setPlannerError(null);
+    setQualitySummary(null);
 
     try {
       const synthesisToUse = await ensureSynthesis();
+      const completedDrafts: WeeklySlotDraft[] = [];
 
       for (let index = 0; index < draftableSlots.length; index += 1) {
         const slot = draftableSlots[index];
-        activeSlot = slot;
         setDraftingSlotId(slot.id);
         setBulkDraftProgress({
           current: index + 1,
@@ -357,15 +476,13 @@ function WeeklyPlanner() {
           label: getWeeklySlotDraftLabel(slot),
         });
 
-        await requestSlotDraft(slot.id, synthesisToUse, slotsSnapshot);
+        const draft = await requestSlotDraft(slot.id, synthesisToUse, slotsSnapshot);
+        completedDrafts.push(draft);
+        setQualitySummary(summarizeQualityDrafts(completedDrafts));
       }
     } catch (error: any) {
       const message = error.message || "Failed to draft all slots.";
-      setPlannerError(
-        activeSlot
-          ? `Failed while drafting slot ${activeSlot.slotNumber}: ${message}`
-          : message
-      );
+      setPlannerError(message);
     } finally {
       setPlannerStage(null);
       setDraftingSlotId(null);
@@ -466,9 +583,15 @@ function WeeklyPlanner() {
               {WEEKLY_DRAFT_MODE_OPTIONS.map((option) => (
                 <button
                   key={option.value}
+                  type="button"
+                  aria-pressed={bulkDraftMode === option.value}
                   onClick={() => handleSetAllDraftModes(option.value)}
                   disabled={plannerStage !== null}
-                  className="rounded-lg border border-gray-600 px-4 py-2 text-sm text-gray-300 transition-colors hover:border-gray-400 hover:text-white disabled:opacity-50"
+                  className={`rounded-lg border px-4 py-2 text-sm transition-colors disabled:opacity-50 ${
+                    bulkDraftMode === option.value
+                      ? "border-purple-400 bg-purple-600 text-white shadow-sm shadow-purple-900/40"
+                      : "border-gray-600 text-gray-300 hover:border-gray-400 hover:text-white"
+                  }`}
                 >
                   {option.label}
                 </button>
@@ -565,6 +688,23 @@ function WeeklyPlanner() {
             </div>
           )}
 
+          {blockedFreshContextSlots.length > 0 && (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+              Fresh context needed before drafting:{" "}
+              {blockedFreshContextSlots
+                .map((slot) => `slot ${slot.slotNumber} ${slot.archetype}`)
+                .join(", ")}.
+            </div>
+          )}
+
+          {qualitySummary && (
+            <div className="rounded-xl border border-purple-500/30 bg-purple-500/10 px-4 py-3 text-sm text-purple-100">
+              Quality run: {qualitySummary.succeeded}/{qualitySummary.totalSlots} succeeded,
+              {" "}{qualitySummary.lowConfidence} low confidence,
+              {" "}{qualitySummary.failed} failed.
+            </div>
+          )}
+
           <div className="space-y-4">
             {slots.map((slot) => (
               <div
@@ -588,7 +728,11 @@ function WeeklyPlanner() {
 
                   <button
                     onClick={() => handleDraftSlot(slot.id)}
-                    disabled={plannerStage !== null || !isDraftableWeeklySlot(slot)}
+                    disabled={
+                      plannerStage !== null ||
+                      !isDraftableWeeklySlot(slot) ||
+                      !isWeeklySlotReadyForDraft(slot)
+                    }
                     className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
                   >
                     {(plannerStage === "draft_slot" || plannerStage === "draft_all") &&
@@ -597,6 +741,13 @@ function WeeklyPlanner() {
                       : "Draft This Slot"}
                   </button>
                 </div>
+
+                {getFreshContextRequirement(slot) && (
+                  <div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                    {getFreshContextRequirement(slot)}. Add the game, partner,
+                    launch, or traction proof point in Topic or Evidence.
+                  </div>
+                )}
 
                 <div className="grid gap-3 xl:grid-cols-6">
                   <Field label="Day">
@@ -701,16 +852,29 @@ function WeeklyPlanner() {
                 {draftsBySlotId[slot.id] && (
                   <div className="mt-4 rounded-2xl border border-purple-500/30 bg-purple-900/10 p-4">
                     <div className="flex items-center justify-between gap-2">
-                      <h5 className="text-sm font-semibold text-white">Current Draft</h5>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h5 className="text-sm font-semibold text-white">Current Draft</h5>
+                        {getQualityBadgeLabel(draftsBySlotId[slot.id]) && (
+                          <span
+                            className={`rounded-full border px-2 py-0.5 text-[11px] capitalize ${getConfidenceClasses(
+                              draftsBySlotId[slot.id].confidence
+                            )}`}
+                          >
+                            {getQualityBadgeLabel(draftsBySlotId[slot.id])}
+                          </span>
+                        )}
+                      </div>
                       <button
                         onClick={() => handleCopyDraft(draftsBySlotId[slot.id].primaryDraft)}
+                        disabled={!draftsBySlotId[slot.id].primaryDraft}
                         className="rounded-lg border border-gray-600 px-3 py-1.5 text-xs text-gray-300 transition-colors hover:border-gray-400 hover:text-white"
                       >
                         Copy Primary
                       </button>
                     </div>
                     <p className="mt-3 whitespace-pre-line text-sm text-white">
-                      {draftsBySlotId[slot.id].primaryDraft}
+                      {draftsBySlotId[slot.id].primaryDraft ||
+                        "No valid draft returned for this slot."}
                     </p>
                   </div>
                 )}
@@ -762,18 +926,32 @@ function WeeklyPlanner() {
                       </button>
                     </div>
 
-                    <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                      <DraftVariantCard
-                        title="Primary Draft"
-                        tweet={draft.primaryDraft}
-                        onCopy={handleCopyDraft}
-                      />
-                      <DraftVariantCard
-                        title="Alternate Draft"
-                        tweet={draft.alternateDraft}
-                        onCopy={handleCopyDraft}
-                      />
-                    </div>
+                    {draft.candidates?.length ? (
+                      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                        {getQualityCandidateCards(draft).map((candidate) => (
+                          <DraftVariantCard
+                            key={`${slot.id}-${candidate.id}`}
+                            title={candidate.title}
+                            tweet={candidate.tweet}
+                            selected={candidate.selected}
+                            onCopy={handleCopyDraft}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                        <DraftVariantCard
+                          title="Primary Draft"
+                          tweet={draft.primaryDraft}
+                          onCopy={handleCopyDraft}
+                        />
+                        <DraftVariantCard
+                          title="Alternate Draft"
+                          tweet={draft.alternateDraft}
+                          onCopy={handleCopyDraft}
+                        />
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -911,24 +1089,41 @@ function WeeklyListView({
 function DraftVariantCard({
   title,
   tweet,
+  selected = false,
   onCopy,
 }: {
   title: string;
   tweet: string;
+  selected?: boolean;
   onCopy: (text: string) => Promise<void>;
 }) {
   return (
-    <div className="rounded-xl border border-gray-700 bg-white/5 p-4">
+    <div
+      className={`rounded-xl border p-4 ${
+        selected
+          ? "border-emerald-500/50 bg-emerald-500/10"
+          : "border-gray-700 bg-white/5"
+      }`}
+    >
       <div className="flex items-center justify-between gap-2">
-        <p className="text-xs uppercase tracking-wide text-gray-400">{title}</p>
+        <p
+          className={`text-xs uppercase tracking-wide ${
+            selected ? "text-emerald-200" : "text-gray-400"
+          }`}
+        >
+          {title}
+        </p>
         <button
           onClick={() => onCopy(tweet)}
+          disabled={!tweet}
           className="rounded-lg border border-gray-600 px-3 py-1.5 text-xs text-gray-300 transition-colors hover:border-gray-400 hover:text-white"
         >
           Copy
         </button>
       </div>
-      <p className="mt-3 whitespace-pre-line text-sm text-white">{tweet}</p>
+      <p className="mt-3 whitespace-pre-line text-sm text-white">
+        {tweet || "No draft returned."}
+      </p>
     </div>
   );
 }

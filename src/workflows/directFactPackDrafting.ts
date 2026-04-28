@@ -207,6 +207,20 @@ function validateDirectDraft(
   return { issues };
 }
 
+function getValidTweets(
+  output: DirectDraftOutput,
+  input: DirectFactPackDraftInput
+) {
+  const validation = validateDirectDraft(output, input);
+  const invalidIndexes = new Set(
+    validation.issues
+      .filter((issue) => issue.tweetIndex >= 0)
+      .map((issue) => issue.tweetIndex)
+  );
+
+  return output.tweets.filter((_, index) => !invalidIndexes.has(index));
+}
+
 function formatValidationIssues(issues: DirectDraftValidationIssue[]) {
   return issues
     .map((issue) =>
@@ -288,6 +302,14 @@ export async function runDirectFactPackDraftStage(
   const rewriteValidation = validateDirectDraft(normalizedRewrite, input);
 
   if (rewriteValidation.issues.length > 0) {
+    const validTweets = getValidTweets(normalizedRewrite, input);
+    if (validTweets.length > 0) {
+      return {
+        ...normalizedRewrite,
+        tweets: validTweets.slice(0, 6),
+      };
+    }
+
     throw new Error(
       `Direct fact-pack draft validation failed after rewrite: ${formatValidationIssues(
         rewriteValidation.issues

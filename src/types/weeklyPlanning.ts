@@ -10,8 +10,16 @@ export type AudienceLens =
   | "market_observer";
 
 export type SlotStatus = "planned" | "drafted" | "approved" | "scheduled";
-export type WeeklyDraftMode = "research" | "quick" | "internal";
+export type WeeklyDraftMode = "research" | "quick" | "internal" | "quality";
 export type WeeklyPlanningMode = "default_slots" | "new_context";
+export type WeeklyQualityConfidence = "high" | "medium" | "low";
+export type WeeklyQualityFailureMode =
+  | "no_valid_candidates"
+  | "frame_failed"
+  | "candidate_failed"
+  | "critic_failed"
+  | "generation_failed"
+  | "timeout";
 
 export interface WeeklyInput {
   weekOf: string;
@@ -52,6 +60,13 @@ export interface WeeklySlotDraft {
   slotId: string;
   primaryDraft: string;
   alternateDraft: string;
+  selectedCandidateId?: string | null;
+  alternateDrafts?: string[];
+  candidates?: WeeklySlotCandidate[];
+  scores?: WeeklySlotCriticScore[];
+  confidence?: WeeklyQualityConfidence;
+  failureMode?: WeeklyQualityFailureMode | null;
+  selectionReason?: string;
 }
 
 export type WeeklyDraftKey = "primaryDraft" | "alternateDraft";
@@ -63,6 +78,60 @@ export interface WeeklyPairDraftResult {
   alternateDraft: string;
   factsUsed: string[];
   rationale: string;
+}
+
+export interface WeeklySlotFrame {
+  topic: string;
+  archetype: Archetype;
+  goal: string;
+  audienceBelief: string;
+  desiredShift: string;
+  proof: string[];
+  immutableRelevance: string;
+  avoid: string[];
+}
+
+export interface WeeklySlotCandidate {
+  id: string;
+  tweet: string;
+  hook: string;
+  angle: string;
+  factsUsed: string[];
+  rationale: string;
+  validationIssues: string[];
+}
+
+export interface WeeklySlotCriticScore {
+  candidateId: string;
+  grounding: number;
+  ctBelievability: number;
+  causalFlow: number;
+  founderVoice: number;
+  nonObviousness: number;
+  selfPromoRisk: number;
+  aiLanguageRisk: number;
+  total: number;
+  reason: string;
+}
+
+export interface WeeklyQualityRunSummary {
+  totalSlots: number;
+  succeeded: number;
+  failed: number;
+  lowConfidence: number;
+  criticFailures: number;
+  generationFailures: number;
+}
+
+export interface WeeklyQualityDraftResult extends WeeklySlotDraft {
+  selectedCandidateId: string | null;
+  alternateDrafts: string[];
+  candidates: WeeklySlotCandidate[];
+  scores: WeeklySlotCriticScore[];
+  confidence: WeeklyQualityConfidence;
+  failureMode: WeeklyQualityFailureMode | null;
+  selectionReason: string;
+  frame?: WeeklySlotFrame;
 }
 
 export const WEEKLY_ARCHETYPE_OPTIONS = weeklyArchetypeOptions;
@@ -89,6 +158,7 @@ export const WEEKLY_DRAFT_MODE_OPTIONS: {
   { value: "internal", label: "Internal only (DB, no web)" },
   { value: "quick", label: "Quick research (3 web searches)" },
   { value: "research", label: "Deep research (6-stage pipeline)" },
+  { value: "quality", label: "Quality mode (frame + candidates)" },
 ];
 
 export const WEEKLY_SLOT_COUNT = 15;
@@ -198,7 +268,7 @@ export const ARCHETYPE_DEFAULTS: Record<
   "Signing Preannouncement": {
     goal: "Build anticipation around an upcoming signing without overexplaining it",
     tweetStyle: "oneliner",
-    evidencePrompt: "Teaser-worthy proof point, partner quality signal, or strategic hint that creates anticipation",
+    evidencePrompt: "Required: signed game/studio hint plus bullish proof point (MAU, revenue, franchise, funding, audience, genre, pedigree)",
   },
   "Mobile gaming": {
     goal: "Connect mobile distribution and player behavior to the broader platform story",

@@ -77,17 +77,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ tweets: result.tweets });
     }
 
-    const skillName =
-      requestData.dataSource === "internal"
-        ? "direct-draft-internal"
-        : "direct-draft";
-
     const result = await executeSkill<{
       tweets: string[];
       factsUsed?: string[];
       rationale?: string;
     }>(
-      skillName,
+      "direct-draft",
       withAliases({
         topic: requestData.topic,
         narrative: requestData.overarchingNarrative || requestData.topic,
