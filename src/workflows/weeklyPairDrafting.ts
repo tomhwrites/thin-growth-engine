@@ -230,6 +230,51 @@ function validateWeeklyPairDraft(
   };
 }
 
+function getValidDraftByKey(
+  output: WeeklyPairDraftResult,
+  input: RunWeeklyPairDraftInput
+) {
+  const validation = validateWeeklyPairDraft(output, input);
+  const invalidKeys = new Set(validation.issues.map((issue) => issue.draftKey));
+
+  return {
+    primaryDraft: invalidKeys.has("primaryDraft") ? "" : output.primaryDraft,
+    alternateDraft: invalidKeys.has("alternateDraft") ? "" : output.alternateDraft,
+  };
+}
+
+function recoverValidPairDraft(
+  rewrittenOutput: WeeklyPairDraftResult,
+  initialOutput: WeeklyPairDraftResult,
+  input: RunWeeklyPairDraftInput
+): WeeklyPairDraftResult | null {
+  const rewrittenValid = getValidDraftByKey(rewrittenOutput, input);
+  const initialValid = getValidDraftByKey(initialOutput, input);
+  const primaryDraft =
+    rewrittenValid.primaryDraft ||
+    initialValid.primaryDraft ||
+    rewrittenValid.alternateDraft ||
+    initialValid.alternateDraft;
+  const alternateDraft =
+    rewrittenValid.alternateDraft ||
+    initialValid.alternateDraft ||
+    rewrittenValid.primaryDraft ||
+    initialValid.primaryDraft ||
+    primaryDraft;
+
+  if (!primaryDraft || !alternateDraft) return null;
+
+  const recovered = {
+    ...rewrittenOutput,
+    primaryDraft,
+    alternateDraft,
+  };
+
+  return validateWeeklyPairDraft(recovered, input).issues.length === 0
+    ? recovered
+    : null;
+}
+
 function formatValidationIssues(issues: WeeklyDraftValidationIssue[]) {
   return issues
     .map((issue) =>
@@ -305,6 +350,13 @@ export async function runWeeklyPairDraftStage(
   const rewriteValidation = validateWeeklyPairDraft(normalizedRewrite, input);
 
   if (rewriteValidation.issues.length > 0) {
+    const recovered = recoverValidPairDraft(
+      normalizedRewrite,
+      normalizedInitial,
+      input
+    );
+    if (recovered) return recovered;
+
     throw new Error(
       `Weekly pair draft validation failed after rewrite: ${formatValidationIssues(
         rewriteValidation.issues

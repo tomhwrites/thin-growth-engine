@@ -357,13 +357,13 @@ Current default 15-slot BAU sequence:
 2. Identity / Attribution -> multiparagraph
 3. New combined Web3 thesis -> multiparagraph
 4. Product Launch / Update -> comparison
-5. Partner Game Announcement -> hookbullets
-6. Partner Traction / Proof Point -> comparison
+5. Macro trends / Regulation -> multiparagraph
+6. Community engagement -> oneliner
 7. Ecosystem Traction -> hookbullets
 8. Web2 will become Web3 -> multiparagraph
 9. Macro trends / Regulation -> multiparagraph
 10. Vision / Industry Thesis -> multiparagraph
-11. Signing Preannouncement -> oneliner
+11. New combined Web3 thesis -> multiparagraph
 12. Mobile gaming -> hookbullets
 13. AI gaming -> multiparagraph
 14. Community engagement -> oneliner

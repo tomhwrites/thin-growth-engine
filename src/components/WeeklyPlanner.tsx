@@ -24,6 +24,7 @@ import {
 type PlannerRequestStage = "synthesize" | "plan" | "draft_slot" | "draft_all";
 type PlannerStage = "plan" | "draft_slot" | "draft_all" | null;
 type ScheduleViewMode = "timeline" | "list";
+type DraftingViewMode = "setup" | "draft_grid";
 type BulkDraftProgress = {
   current: number;
   total: number;
@@ -141,6 +142,8 @@ function WeeklyPlanner() {
   const [plannerStage, setPlannerStage] = useState<PlannerStage>(null);
   const [plannerError, setPlannerError] = useState<string | null>(null);
   const [scheduleView, setScheduleView] = useState<ScheduleViewMode>("timeline");
+  const [draftingView, setDraftingView] =
+    useState<DraftingViewMode>("setup");
   const [draftingSlotId, setDraftingSlotId] = useState<string | null>(null);
   const [bulkDraftProgress, setBulkDraftProgress] =
     useState<BulkDraftProgress | null>(null);
@@ -179,6 +182,34 @@ function WeeklyPlanner() {
     }));
   }, [plannedSlots]);
 
+  const draftedDayGroups = useMemo(() => {
+    const dayOrder = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+    const groups = new Map<string, WeeklyPlanSlot[]>();
+
+    plannedSlots.forEach((slot) => {
+      if (!draftsBySlotId[slot.id]) return;
+      const key = slot.day.trim() || "Unassigned";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(slot);
+    });
+
+    const entries = Array.from(groups.entries()).map(([day, daySlots]) => ({
+      day,
+      slots: daySlots.sort((a, b) => a.slotNumber - b.slotNumber),
+    }));
+
+    entries.sort((a, b) => {
+      const ia = dayOrder.indexOf(a.day);
+      const ib = dayOrder.indexOf(b.day);
+      if (ia === -1 && ib === -1) return a.day.localeCompare(b.day);
+      if (ia === -1) return 1;
+      if (ib === -1) return -1;
+      return ia - ib;
+    });
+
+    return entries;
+  }, [plannedSlots, draftsBySlotId]);
+
   const scheduleListItems = useMemo(() => {
     const groups = new Map<
       string,
@@ -212,6 +243,17 @@ function WeeklyPlanner() {
   const blockedFreshContextSlots = useMemo(
     () => draftableSlots.filter((slot) => !isWeeklySlotReadyForDraft(slot)),
     [draftableSlots]
+  );
+
+  const slotSetupItems = useMemo(
+    () =>
+      [...slots].sort((a, b) => {
+        const aRequiresInput = Boolean(getFreshContextRequirement(a));
+        const bRequiresInput = Boolean(getFreshContextRequirement(b));
+        if (aRequiresInput !== bRequiresInput) return aRequiresInput ? -1 : 1;
+        return a.slotNumber - b.slotNumber;
+      }),
+    [slots]
   );
 
   const bulkDraftMode = useMemo(() => {
@@ -668,17 +710,29 @@ function WeeklyPlanner() {
               </p>
             </div>
 
-            <button
-              onClick={handleDraftAllSlots}
-              disabled={plannerStage !== null || draftableSlots.length === 0}
-              className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
-            >
-              {plannerStage === "draft_all"
-                ? bulkDraftProgress
-                  ? `Drafting ${bulkDraftProgress.current}/${bulkDraftProgress.total}...`
-                  : "Drafting..."
-                : `${Object.keys(draftsBySlotId).length > 0 ? "Redraft" : "Draft"} All ${draftableSlots.length} Tweets`}
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <ScheduleToggleButton
+                active={draftingView === "setup"}
+                label="Setup View"
+                onClick={() => setDraftingView("setup")}
+              />
+              <ScheduleToggleButton
+                active={draftingView === "draft_grid"}
+                label="Draft Grid"
+                onClick={() => setDraftingView("draft_grid")}
+              />
+              <button
+                onClick={handleDraftAllSlots}
+                disabled={plannerStage !== null || draftableSlots.length === 0}
+                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {plannerStage === "draft_all"
+                  ? bulkDraftProgress
+                    ? `Drafting ${bulkDraftProgress.current}/${bulkDraftProgress.total}...`
+                    : "Drafting..."
+                  : `${Object.keys(draftsBySlotId).length > 0 ? "Redraft" : "Draft"} All ${draftableSlots.length} Tweets`}
+              </button>
+            </div>
           </div>
 
           {bulkDraftProgress && (
@@ -705,182 +759,221 @@ function WeeklyPlanner() {
             </div>
           )}
 
-          <div className="space-y-4">
-            {slots.map((slot) => (
-              <div
-                key={slot.id}
-                className="rounded-2xl border border-gray-700 bg-black/10 p-4"
-              >
-                <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <div className="text-xs uppercase tracking-wide text-purple-300">
-                      Slot {slot.slotNumber} · {slot.day}
-                    </div>
-                    <h4 className="text-base font-semibold text-white">
-                      {slot.scheduleLabel || slot.topic || "Untitled slot"}
-                    </h4>
-                    {slot.scheduleLabel.trim() &&
-                      slot.topic.trim() &&
-                      slot.scheduleLabel.trim() !== slot.topic.trim() && (
-                        <p className="mt-1 text-sm text-gray-400">{slot.topic}</p>
-                      )}
-                  </div>
+          {draftingView === "draft_grid" ? (
+            <WeeklyDraftGridView
+              dayGroups={draftedDayGroups}
+              draftsBySlotId={draftsBySlotId}
+              onCopy={handleCopyDraft}
+            />
+          ) : (
+            <div className="space-y-3">
+              {slotSetupItems.map((slot) => {
+                const freshContextRequirement = getFreshContextRequirement(slot);
+                const hasDraft = Boolean(draftsBySlotId[slot.id]?.primaryDraft);
 
-                  <button
-                    onClick={() => handleDraftSlot(slot.id)}
-                    disabled={
-                      plannerStage !== null ||
-                      !isDraftableWeeklySlot(slot) ||
-                      !isWeeklySlotReadyForDraft(slot)
-                    }
-                    className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+                return (
+                  <div
+                    key={slot.id}
+                    className={`rounded-xl border px-4 py-3 ${
+                      freshContextRequirement
+                        ? "border-amber-500/40 bg-amber-500/10"
+                        : "border-gray-700 bg-black/10"
+                    }`}
                   >
-                    {(plannerStage === "draft_slot" || plannerStage === "draft_all") &&
-                    draftingSlotId === slot.id
-                      ? "Drafting..."
-                      : "Draft This Slot"}
-                  </button>
-                </div>
-
-                {getFreshContextRequirement(slot) && (
-                  <div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
-                    {getFreshContextRequirement(slot)}. Add the game, partner,
-                    launch, or traction proof point in Topic or Evidence.
-                  </div>
-                )}
-
-                <div className="grid gap-3 xl:grid-cols-6">
-                  <Field label="Day">
-                    <input
-                      value={slot.day}
-                      onChange={(event) =>
-                        updateSlot(slot.id, "day", event.target.value)
-                      }
-                      className="w-full rounded-lg border border-gray-600 bg-white/10 px-3 py-2 text-white outline-none focus:border-purple-500"
-                    />
-                  </Field>
-                  <Field label="Schedule Label">
-                    <input
-                      value={slot.scheduleLabel}
-                      onChange={(event) =>
-                        updateSlot(slot.id, "scheduleLabel", event.target.value)
-                      }
-                      className="w-full rounded-lg border border-gray-600 bg-white/10 px-3 py-2 text-white outline-none focus:border-purple-500"
-                    />
-                  </Field>
-                  <Field label="Archetype">
-                    <select
-                      value={slot.archetype}
-                      onChange={(event) =>
-                        updateSlot(
-                          slot.id,
-                          "archetype",
-                          event.target.value as WeeklyPlanSlot["archetype"]
-                        )
-                      }
-                      className="w-full rounded-lg border border-gray-600 bg-white/10 px-3 py-2 text-white outline-none focus:border-purple-500"
-                    >
-                      {WEEKLY_ARCHETYPE_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value} className="bg-gray-900">
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="Form">
-                    <select
-                      value={slot.tweetStyle}
-                      onChange={(event) =>
-                        updateSlot(slot.id, "tweetStyle", event.target.value)
-                      }
-                      className="w-full rounded-lg border border-gray-600 bg-white/10 px-3 py-2 text-white outline-none focus:border-purple-500"
-                    >
-                      {styleOptions.map((option) => (
-                        <option key={option.value} value={option.value} className="bg-gray-900">
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="Draft Method">
-                    <select
-                      value={slot.draftMode}
-                      onChange={(event) =>
-                        updateSlot(
-                          slot.id,
-                          "draftMode",
-                          event.target.value as WeeklyPlanSlot["draftMode"]
-                        )
-                      }
-                      className="w-full rounded-lg border border-gray-600 bg-white/10 px-3 py-2 text-white outline-none focus:border-purple-500"
-                    >
-                      {WEEKLY_DRAFT_MODE_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value} className="bg-gray-900">
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                </div>
-
-                <div className="mt-3">
-                  <Field label="Topic">
-                    <textarea
-                      value={slot.topic}
-                      onChange={(event) =>
-                        updateSlot(slot.id, "topic", event.target.value)
-                      }
-                      placeholder="What does this tweet need to be about?"
-                      className="min-h-[96px] w-full rounded-lg border border-gray-600 bg-white/10 px-3 py-2 text-white outline-none placeholder:text-gray-500 focus:border-purple-500"
-                    />
-                  </Field>
-                </div>
-
-                <div className="mt-3">
-                  <Field label="Evidence / Source Notes">
-                    <textarea
-                      value={slot.evidence}
-                      onChange={(event) =>
-                        updateSlot(slot.id, "evidence", event.target.value)
-                      }
-                      placeholder={ARCHETYPE_DEFAULTS[slot.archetype].evidencePrompt}
-                      className="min-h-[96px] w-full rounded-lg border border-gray-600 bg-white/10 px-3 py-2 text-white outline-none placeholder:text-gray-500 focus:border-purple-500"
-                    />
-                  </Field>
-                </div>
-
-                {draftsBySlotId[slot.id] && (
-                  <div className="mt-4 rounded-2xl border border-purple-500/30 bg-purple-900/10 p-4">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h5 className="text-sm font-semibold text-white">Current Draft</h5>
-                        {getQualityBadgeLabel(draftsBySlotId[slot.id]) && (
-                          <span
-                            className={`rounded-full border px-2 py-0.5 text-[11px] capitalize ${getConfidenceClasses(
-                              draftsBySlotId[slot.id].confidence
-                            )}`}
-                          >
-                            {getQualityBadgeLabel(draftsBySlotId[slot.id])}
+                    <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                      <div className="min-w-0">
+                        <div
+                          className={`text-[11px] font-medium uppercase tracking-wide ${
+                            freshContextRequirement ? "text-amber-200" : "text-purple-300"
+                          }`}
+                        >
+                          Slot {slot.slotNumber} · {slot.day}
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center gap-2">
+                          <div className="truncate text-sm font-semibold text-white">
+                            {slot.scheduleLabel || slot.topic || "Untitled slot"}
+                          </div>
+                          <span className="rounded-full border border-gray-700 bg-white/5 px-2 py-0.5 text-[11px] text-gray-300">
+                            {slot.tweetStyle}
                           </span>
+                          <span className="rounded-full border border-gray-700 bg-white/5 px-2 py-0.5 text-[11px] text-gray-300">
+                            {slot.draftMode}
+                          </span>
+                          {hasDraft && (
+                            <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[11px] text-emerald-100">
+                              drafted
+                            </span>
+                          )}
+                          {draftsBySlotId[slot.id] &&
+                            getQualityBadgeLabel(draftsBySlotId[slot.id]) && (
+                              <span
+                                className={`rounded-full border px-2 py-0.5 text-[11px] capitalize ${getConfidenceClasses(
+                                  draftsBySlotId[slot.id].confidence
+                                )}`}
+                              >
+                                {getQualityBadgeLabel(draftsBySlotId[slot.id])}
+                              </span>
+                            )}
+                        </div>
+                        {freshContextRequirement && (
+                          <div className="mt-2 text-xs text-amber-100">
+                            {freshContextRequirement}. Add the game, launch, partner, or proof point in
+                            Topic or Evidence.
+                          </div>
                         )}
                       </div>
-                      <button
-                        onClick={() => handleCopyDraft(draftsBySlotId[slot.id].primaryDraft)}
-                        disabled={!draftsBySlotId[slot.id].primaryDraft}
-                        className="rounded-lg border border-gray-600 px-3 py-1.5 text-xs text-gray-300 transition-colors hover:border-gray-400 hover:text-white"
-                      >
-                        Copy Primary
-                      </button>
+
+                      <div className="flex shrink-0 flex-wrap items-center gap-2">
+                        {draftsBySlotId[slot.id]?.primaryDraft && (
+                          <button
+                            onClick={() => handleCopyDraft(draftsBySlotId[slot.id].primaryDraft)}
+                            className="rounded-lg border border-gray-600 px-3 py-1.5 text-xs text-gray-300 transition-colors hover:border-gray-400 hover:text-white"
+                          >
+                            Copy Draft
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleDraftSlot(slot.id)}
+                          disabled={
+                            plannerStage !== null ||
+                            !isDraftableWeeklySlot(slot) ||
+                            !isWeeklySlotReadyForDraft(slot)
+                          }
+                          className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+                        >
+                          {(plannerStage === "draft_slot" || plannerStage === "draft_all") &&
+                          draftingSlotId === slot.id
+                            ? "Drafting..."
+                            : "Draft Slot"}
+                        </button>
+                      </div>
                     </div>
-                    <p className="mt-3 whitespace-pre-line text-sm text-white">
-                      {draftsBySlotId[slot.id].primaryDraft ||
-                        "No valid draft returned for this slot."}
-                    </p>
+
+                    <details className="mt-3 rounded-lg border border-gray-700 bg-white/5 px-3 py-2">
+                      <summary className="cursor-pointer text-sm font-medium text-gray-200">
+                        Slot Details
+                      </summary>
+                      <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        <Field label="Day">
+                          <input
+                            value={slot.day}
+                            onChange={(event) =>
+                              updateSlot(slot.id, "day", event.target.value)
+                            }
+                            className="w-full rounded-lg border border-gray-600 bg-white/10 px-3 py-2 text-white outline-none focus:border-purple-500"
+                          />
+                        </Field>
+                        <Field label="Schedule Label">
+                          <input
+                            value={slot.scheduleLabel}
+                            onChange={(event) =>
+                              updateSlot(slot.id, "scheduleLabel", event.target.value)
+                            }
+                            className="w-full rounded-lg border border-gray-600 bg-white/10 px-3 py-2 text-white outline-none focus:border-purple-500"
+                          />
+                        </Field>
+                        <Field label="Archetype">
+                          <select
+                            value={slot.archetype}
+                            onChange={(event) =>
+                              updateSlot(
+                                slot.id,
+                                "archetype",
+                                event.target.value as WeeklyPlanSlot["archetype"]
+                              )
+                            }
+                            className="w-full rounded-lg border border-gray-600 bg-white/10 px-3 py-2 text-white outline-none focus:border-purple-500"
+                          >
+                            {WEEKLY_ARCHETYPE_OPTIONS.map((option) => (
+                              <option
+                                key={option.value}
+                                value={option.value}
+                                className="bg-gray-900"
+                              >
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                        <Field label="Form">
+                          <select
+                            value={slot.tweetStyle}
+                            onChange={(event) =>
+                              updateSlot(slot.id, "tweetStyle", event.target.value)
+                            }
+                            className="w-full rounded-lg border border-gray-600 bg-white/10 px-3 py-2 text-white outline-none focus:border-purple-500"
+                          >
+                            {styleOptions.map((option) => (
+                              <option
+                                key={option.value}
+                                value={option.value}
+                                className="bg-gray-900"
+                              >
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                        <Field label="Draft Method">
+                          <select
+                            value={slot.draftMode}
+                            onChange={(event) =>
+                              updateSlot(
+                                slot.id,
+                                "draftMode",
+                                event.target.value as WeeklyPlanSlot["draftMode"]
+                              )
+                            }
+                            className="w-full rounded-lg border border-gray-600 bg-white/10 px-3 py-2 text-white outline-none focus:border-purple-500"
+                          >
+                            {WEEKLY_DRAFT_MODE_OPTIONS.map((option) => (
+                              <option
+                                key={option.value}
+                                value={option.value}
+                                className="bg-gray-900"
+                              >
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                      </div>
+
+                      <div className="mt-3 space-y-3">
+                        <Field label="Topic">
+                          <textarea
+                            value={slot.topic}
+                            onChange={(event) =>
+                              updateSlot(slot.id, "topic", event.target.value)
+                            }
+                            placeholder="What does this tweet need to be about?"
+                            className="min-h-[84px] w-full rounded-lg border border-gray-600 bg-white/10 px-3 py-2 text-white outline-none placeholder:text-gray-500 focus:border-purple-500"
+                          />
+                        </Field>
+                        <Field label="Evidence / Source Notes">
+                          <textarea
+                            value={slot.evidence}
+                            onChange={(event) =>
+                              updateSlot(slot.id, "evidence", event.target.value)
+                            }
+                            placeholder={ARCHETYPE_DEFAULTS[slot.archetype].evidencePrompt}
+                            className="min-h-[84px] w-full rounded-lg border border-gray-600 bg-white/10 px-3 py-2 text-white outline-none placeholder:text-gray-500 focus:border-purple-500"
+                          />
+                        </Field>
+                        {draftsBySlotId[slot.id]?.primaryDraft && (
+                          <Field label="Current Draft">
+                            <pre className="whitespace-pre-wrap rounded-lg border border-gray-700 bg-black/20 p-3 text-xs text-gray-200">
+                              {draftsBySlotId[slot.id].primaryDraft}
+                            </pre>
+                          </Field>
+                        )}
+                      </div>
+                    </details>
                   </div>
-                )}
-              </div>
-            ))}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -1082,6 +1175,85 @@ function WeeklyListView({
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function WeeklyDraftGridView({
+  dayGroups,
+  draftsBySlotId,
+  onCopy,
+}: {
+  dayGroups: { day: string; slots: WeeklyPlanSlot[] }[];
+  draftsBySlotId: Record<string, WeeklySlotDraft>;
+  onCopy: (text: string) => Promise<void>;
+}) {
+  const dayOrder = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+  const byDay = new Map(dayGroups.map((group) => [group.day, group.slots]));
+  const days = [
+    ...dayOrder.filter((day) => byDay.has(day)),
+    ...Array.from(byDay.keys()).filter((day) => !dayOrder.includes(day)),
+  ];
+
+  return (
+    <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-5">
+      {days.map((day) => (
+        <div
+          key={day}
+          className="rounded-2xl border border-gray-700 bg-black/10 p-3"
+        >
+          <div className="border-b border-gray-700 pb-2">
+            <p className="text-sm font-semibold text-white">{day}</p>
+            <p className="text-xs text-gray-500">
+              {(byDay.get(day) || []).filter(
+                (slot) => Boolean(draftsBySlotId[slot.id]?.primaryDraft)
+              ).length}
+              /
+              {(byDay.get(day) || []).length} drafted
+            </p>
+          </div>
+
+          <div className="mt-3 space-y-3">
+            {(byDay.get(day) || [])
+              .slice()
+              .sort((a, b) => a.slotNumber - b.slotNumber)
+              .map((slot) => {
+              const draft = draftsBySlotId[slot.id];
+              const tweet = draft?.primaryDraft || "";
+              const label = getWeeklySlotDraftLabel(slot);
+
+              return (
+                <div
+                  key={slot.id}
+                  className="rounded-xl border border-gray-700 bg-white/5 p-3"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-[11px] uppercase tracking-wide text-purple-300">
+                        Slot {slot.slotNumber}
+                      </div>
+                      <div className="truncate text-sm font-semibold text-white">
+                        {label}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => onCopy(tweet)}
+                      disabled={!tweet}
+                      className="shrink-0 rounded-lg border border-gray-600 px-2.5 py-1 text-[11px] text-gray-300 transition-colors hover:border-gray-400 hover:text-white disabled:opacity-50"
+                    >
+                      Copy
+                    </button>
+                  </div>
+
+                  <div className="mt-2 whitespace-pre-line text-xs text-gray-100">
+                    {tweet || "No draft returned."}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
